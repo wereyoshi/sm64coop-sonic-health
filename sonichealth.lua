@@ -15,6 +15,7 @@ gGlobalSyncTable.sonicfalldamage = false --toggles fall damage
 gGlobalSyncTable.sonicsuperallow = false --toggles super forms
 gPlayerSyncTable[0].issuper = false  --if the current player is super
 gGlobalSyncTable.superstarreq = 50 --min number of stars for super
+gGlobalSyncTable.superstarsetting = 0 --which config to use for super 0 for x stars for super and 1 for 7 100 coin stars for super
 local timer = 0
 local superformfunction = nil
 
@@ -22,8 +23,28 @@ local supermovesetfunctions = {}--functions that tell other movesets that you ar
 local superformfunctiontablelength = 0
 local bool_to_str = {[false] = "\\#A02200\\off\\#ffffff\\",[true] = "\\#00C7FF\\on\\#ffffff\\"} --table for converting boolean into string
 local superenemyfunctions = {}--table of functions from other mods for unique super interactions with objects with each key being a behaviorid
-local version = "2.0.0"
+local version = "2.1.0"
+local settingsuperbutton = false
 
+local set2ndsuperbutton = false
+
+local buttons = {
+    [A_BUTTON] = {name = "A ",prev = nil ,next = B_BUTTON},
+    [B_BUTTON] = {name = "B ",prev = A_BUTTON ,next = Z_TRIG},
+    [Z_TRIG] = {name = "Z ",prev = B_BUTTON ,next = L_TRIG},
+    [L_TRIG] = {name = "L ",prev = Z_TRIG ,next = R_TRIG},
+    [R_TRIG] = {name = "R ",prev = L_TRIG ,next = X_BUTTON},
+    [X_BUTTON] = {name = "X ",prev = R_TRIG ,next = Y_BUTTON},
+    [Y_BUTTON] = {name = "Y ",prev = X_BUTTON ,next = L_JPAD},
+    [L_JPAD] = {name = "dpad left ",prev = Y_BUTTON ,next = R_JPAD},
+    [R_JPAD] = {name = "dpad right ",prev = L_JPAD ,next = U_JPAD},
+    [U_JPAD] = {name = "dpad up ",prev = R_JPAD ,next = D_JPAD},
+    [D_JPAD] = {name = "dpad down ",prev = U_JPAD ,next = L_CBUTTONS},
+    [L_CBUTTONS] = {name = "c left ",prev = D_JPAD ,next = R_CBUTTONS},
+    [R_CBUTTONS] = {name = "c right ",prev = L_CBUTTONS ,next = U_CBUTTONS},
+    [U_CBUTTONS] = {name = "c up ",prev = R_CBUTTONS ,next = D_CBUTTONS},
+    [D_CBUTTONS] = {name = "c down ",prev = U_CBUTTONS ,next = nil}
+}
 
 local function toboolean(s)
     if s == "false" then
@@ -38,8 +59,15 @@ if mod_storage_load("ringcount_ui_x") == nil or mod_storage_load("ringcount_ui_y
 	mod_storage_save("ringcount_ui_y", "0")
 end
 
+if (mod_storage_load("superbutton1") == nil) or (mod_storage_load("superbutton2") == nil) then
+    mod_storage_save("superbutton1", tostring(X_BUTTON))
+    mod_storage_save("superbutton2", tostring(X_BUTTON))
+end
+
 local ringui_x = tonumber(mod_storage_load("ringcount_ui_x"))
 local ringui_y = tonumber(mod_storage_load("ringcount_ui_y"))
+local superbutton1 = tonumber(mod_storage_load("superbutton1"))
+local superbutton2 = tonumber(mod_storage_load("superbutton2"))
 
 if network_is_server() then
     if (mod_storage_load("friendlyringloss") == nil) or (mod_storage_load("loseringsonlevelchange") == nil) or (mod_storage_load("ringscrushinstadeath") == nil) or (mod_storage_load("decreasecoincounter") == nil) or (mod_storage_load("recoveryheartshield") == nil) or (mod_storage_load("sonicfalldamage") == nil) or (mod_storage_load("sonicsuperallow") == nil) or (mod_storage_load("maxringloss") == nil) or (mod_storage_load("maxrecollectablerings") == nil) then
@@ -229,10 +257,32 @@ local function ringDisplay()
     djui_hud_set_resolution(RESOLUTION_N64)
 
     local scale = 1
+	local superbutton1name
+
+    local superbutton2name
 
 	djui_hud_set_color(255, 255, 255, 255);
-    djui_hud_print_text(string.format("rings %d", ringcount), ringui_x, -ringui_y, scale)
-
+	if settingsuperbutton == true then
+        if buttons[superbutton1] ~= nil then
+            superbutton1name = buttons[superbutton1].name
+        else
+            superbutton1name = "nil"
+        end
+    
+        if buttons[superbutton2] ~= nil then
+            superbutton2name = buttons[superbutton2].name
+        else
+            superbutton2name = "nil"
+        end
+        djui_hud_print_text(string.format("superbutton combo %s +%s",superbutton1name, superbutton2name), 0, -ringui_y, scale)
+		if ringui_y > -120 then
+            djui_hud_print_text("pick button using dpad, a to save, b to cancel", 0, 220, 0.8)
+        else
+            djui_hud_print_text("pick button using dpad, a to save, b to cancel", 0, 0, 0.8)
+        end
+	else
+    	djui_hud_print_text(string.format("rings %d", ringcount), ringui_x, -ringui_y, scale)
+	end
 end
 
 ---@param m MarioState
@@ -294,9 +344,59 @@ local function health_hook_update()
 		end
 
 	end
+	if settingsuperbutton == true then
+        if (gMarioStates[0].controller.buttonPressed == A_BUTTON) then
+            if set2ndsuperbutton == false then
+                set2ndsuperbutton = true
+                gMarioStates[0].controller.buttonPressed = gMarioStates[0].controller.buttonPressed & ~A_BUTTON
+            else
+                settingsuperbutton = false
+                set2ndsuperbutton = false
+                djui_chat_message_create(string.format("sonichealth superbutton1 is %s", buttons[superbutton1].name))
+                djui_chat_message_create(string.format("sonichealth superbutton2 is %s", buttons[superbutton2].name))
+                mod_storage_save("superbutton1", tostring(superbutton1))
+                mod_storage_save("superbutton2", tostring(superbutton2))
+                djui_chat_message_create('sonichealth super button combo  saved to mod storage')
+            end
+        elseif (gMarioStates[0].controller.buttonPressed == B_BUTTON) then
+            settingsuperbutton = false
+            superbutton1 = tonumber(mod_storage_load("superbutton1"))
+            superbutton2 = tonumber(mod_storage_load("superbutton2"))
+            djui_chat_message_create('sonichealth super button config loaded')
+            djui_chat_message_create(string.format("sonichealth superbutton1 is %s", buttons[superbutton1].name))
+            djui_chat_message_create(string.format("sonichealth superbutton2 is %s", buttons[superbutton2].name))
+        else    
+            if (gMarioStates[0].controller.buttonPressed == R_JPAD) and buttons[superbutton1].next ~= nil and set2ndsuperbutton == false then
+                superbutton1 = buttons[superbutton1].next
+            elseif (gMarioStates[0].controller.buttonPressed == L_JPAD) and buttons[superbutton1].prev ~= nil and set2ndsuperbutton == false then
+                superbutton1 = buttons[superbutton1].prev
+            elseif (gMarioStates[0].controller.buttonPressed == R_JPAD) and buttons[superbutton2].next ~= nil and set2ndsuperbutton == true then
+                    superbutton2 = buttons[superbutton2].next
+            elseif (gMarioStates[0].controller.buttonPressed == L_JPAD) and buttons[superbutton2].prev ~= nil and set2ndsuperbutton == true then
+                    superbutton2 = buttons[superbutton2].prev
+            end
+        
+        end
+    end
 
 end
-
+---@param m MarioState
+--Called once per player per frame at the end of a mario update
+local function coinstarcheck(m)
+	local count = 0
+	local starFlags
+	for i = COURSE_BOB, COURSE_RR do
+		starFlags = save_file_get_star_flags(get_current_save_file_num() - 1, i - 1)
+		if (starFlags & (1 << 6) ~= 0) then --checking if a courses 100 coin star was collected
+			count = count + 1
+		end
+	end
+	if count >= 7 then
+		return true
+	else
+		return false
+	end
+end
 
 ---@param m MarioState
 --Called once per player per frame at the end of a mario update
@@ -311,10 +411,10 @@ function mario_update_end(m)
 		m.invincTimer = m.invincTimer + 1
 	end
 
-	if (gGlobalSyncTable.sonicsuperallow == true) and((m.controller.buttonPressed & X_BUTTON) ~= 0) then
+	if (gGlobalSyncTable.sonicsuperallow == true) and ( ( (m.controller.buttonPressed & superbutton1) ~= 0) and ( (m.controller.buttonPressed & superbutton2) ~= 0) ) then
 
 		if gPlayerSyncTable[0].issuper == false and (ringcount >= 50) then
-			if (superformfunction == nil) and (m.numStars >= gGlobalSyncTable.superstarreq)  then
+			if (superformfunction == nil) and (( (gGlobalSyncTable.superstarsetting == 0) and (m.numStars >= gGlobalSyncTable.superstarreq) ) or ( (gGlobalSyncTable.superstarsetting == 1) and (coinstarcheck(m) == true) ))  then
 				supertoggle(true)
 			elseif (superformfunction ~= nil) and superformfunction() == true then
 				supertoggle(true)
@@ -416,7 +516,7 @@ end
 ---@param m MarioState
 ---@param o Object
 ---@param interactType InteractionType
---this function is for allowing kirby to interact with objects.
+--this function is for allowing mario to interact with objects.
 local function allow_interact(m,o,interactType)
 	local superimmunetable = {[INTERACT_DAMAGE] = true,[INTERACT_SHOCK] = true, [INTERACT_FLAME] = true , [INTERACT_SNUFIT_BULLET] = true ,[INTERACT_UNKNOWN_08] = true, [INTERACT_MR_BLIZZARD] = true, [INTERACT_CLAM_OR_BUBBA] = true}
 	if m.playerIndex ~= 0 then
@@ -676,7 +776,11 @@ local function sonicsuper_command(msg)
 	if m == 'prereq' then
 		djui_chat_message_create('you need 50 rings')
 		if superformfunction == nil then
-			djui_chat_message_create(string.format("and %d stars",gGlobalSyncTable.superstarreq))
+			if gGlobalSyncTable.superstarsetting == 0 then
+				djui_chat_message_create(string.format("and %d stars",gGlobalSyncTable.superstarreq))
+			elseif gGlobalSyncTable.superstarsetting == 1 then
+				djui_chat_message_create('and 7 100 coin stars')
+			end
 		elseif superformfunction() ~= nil then
 			superformfunction(m)
 		end
@@ -696,9 +800,14 @@ local function sonicsuper_command(msg)
 		djui_chat_message_create('\\#A02200\\you now cannot go super\\#ffffff\\!')
 		gGlobalSyncTable.sonicsuperallow = false --toggles super forms
 		return true
+	elseif m == '7coinstar' then
+		djui_chat_message_create("super star requirement is now 7 100 coin stars(ignored if an external mod changed it)")
+		gGlobalSyncTable.superstarsetting = 1
+		return true
 	elseif tonumber(m) and tonumber(m) >= 0 then
 		gGlobalSyncTable.superstarreq = tonumber(m)
-		djui_chat_message_create(string.format("super star requirement is now %d (ignored if an external mod changed it)",gGlobalSyncTable.superstarreq))
+		gGlobalSyncTable.superstarsetting = 0
+		djui_chat_message_create(string.format("super star requirement is now %d stars(ignored if an external mod changed it)",gGlobalSyncTable.superstarreq))
 		return true
     end
     return false
@@ -756,7 +865,28 @@ local function sonichealthconfig_command(msg)
 	elseif m == 'printlocal'then
 		djui_chat_message_create(string.format("ring ui x pos is %d",ringui_x))
 		djui_chat_message_create(string.format("ring ui y pos is %d",ringui_y))
+		djui_chat_message_create(string.format("sonichealth superbutton1 is %s", buttons[superbutton1].name))
+        djui_chat_message_create(string.format("sonichealth superbutton2 is %s", buttons[superbutton2].name))
 		return true
+    end
+    return false
+end
+
+--- @param msg string
+--this is the function for changing the super button
+local function sonichealthsuperbutton_command(msg)
+    local m = string.lower(msg)
+    if m == 'reset' then
+        djui_chat_message_create('sonichealth super button was set to default')
+        superbutton1 = X_BUTTON
+        superbutton2 = X_BUTTON
+        djui_chat_message_create(string.format("sonichealth superbutton1 is %s", buttons[superbutton1].name))
+        djui_chat_message_create(string.format("sonichealth superbutton2 is %s", buttons[superbutton2].name))
+        return true
+    elseif m == 'change' then
+        settingsuperbutton = true
+        set2ndsuperbutton = false 
+        return true
     end
     return false
 end
@@ -779,19 +909,21 @@ hook_event(HOOK_ALLOW_INTERACT, allow_interact) --Called before mario interacts 
 id_bhvCoinring = hook_behavior(nil, OBJ_LIST_LEVEL, true, bhv_coinring_init, bhv_coinring_loop)
 hook_behavior(id_bhvRecoveryHeart, OBJ_LIST_LEVEL, false, nil, bhv_sonicshield_heart_loop)
 
-hook_chat_command('friendlyringloss', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn friendlyringloss \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to lose rings due to other players hitting you.", friendlyringloss_command)
+hook_chat_command('friendlyringloss', "[on|off] turn friendlyringloss \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to lose rings due to other players hitting you.", friendlyringloss_command)
 hook_chat_command('maxringloss', "maxringloss [number] this sets the max number of rings you can lose at once set it to 0 to always lose all rings.", maxringloss_command)
 
-hook_chat_command('loseringsonlevelchange', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn loseringsonlevelchange \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to keep your rings between levels.", loseringsonlevelchange_command)
-hook_chat_command('ringscrushinstadeath', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn ringscrushinstadeath \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want being crushed to be instadeath.", ringscrushinstadeath_command)
+hook_chat_command('loseringsonlevelchange', "[on|off] turn loseringsonlevelchange \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to keep your rings between levels.", loseringsonlevelchange_command)
+hook_chat_command('ringscrushinstadeath', "[on|off] turn ringscrushinstadeath \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want being crushed to be instadeath.", ringscrushinstadeath_command)
 hook_chat_command('decreasecoincounter', "[on|off] turn decreasecoincounter on or off to choose if whether to decrease the coin counter on hit and rings equal 1 coin or have the coin counter not decease on hit and rings only affect ring counter", decreasecoincounter_command)
-hook_chat_command('recoveryheartshield', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn recoveryheartshield \\#00C7FF\\on \\#ffffff\\or \\#A02200\\ off \\#ffffff\\ to choose whether recovery hearts should give an overshield on touch.", recoveryheartshield_command)
+hook_chat_command('recoveryheartshield', "[on|off] turn recoveryheartshield \\#00C7FF\\on \\#ffffff\\or \\#A02200\\ off \\#ffffff\\ to choose whether recovery hearts should give an overshield on touch.", recoveryheartshield_command)
 hook_chat_command('sonicfalldamage', "[on|off] turn sonicfalldamage on or off to choose whether you can take fall damage", sonicfalldamage_command)
 hook_chat_command('maxrecollectablerings', "maxrecollectablerings [number] this sets the maximum amount of rings you can get back per hit", maxrecollectablerings_command)
 hook_chat_command('ringui_x', "ringui_x [number] this sets the x position of the ring counter should be a value  between 0 and 320", ringui_x_command)
 hook_chat_command('ringui_y', "ringui_y [number] this sets the y position of the ring counter should be a value between 0 and  -240", ringui_y_command)
-hook_chat_command('sonicsuper', "[on|off|prereq] toggle the ability to go super with 50+ rings + requirement, get the requirement by typing prereq ,or change prereq by entering number of stars needed.", sonicsuper_command)
-hook_chat_command('sonichealthconfig', "[\\#00C7FF\\save\\#ffffff\\|\\#A02200\\load\\#ffffff\\|printserver|printlocal] to save the current sonic health settings to a file or load them (loading only works if used by a moderator or the server)", sonichealthconfig_command)
+hook_chat_command('sonicsuper', "[on|off|prereq|7coinstar] toggle the ability to go super with 50+ rings + requirement, get the requirement by typing prereq ,change prereq by entering number of stars needed or entering 7coinstar to make super require 7 100 coin stars.", sonicsuper_command)
+hook_chat_command('sonichealthconfig', "[save|load|printserver|printlocal] to save the current sonic health settings to a file or load them (loading only works if used by a moderator or the server)", sonichealthconfig_command)
+hook_chat_command('sonichealthsuperbutton', "[reset|change] set the button/buttons to turn super, reset sets it back to default(default x) and change allows you to change it ", sonichealthsuperbutton_command)
+
 
 --sonic health mod api functions
 _G.sonichealth = {
