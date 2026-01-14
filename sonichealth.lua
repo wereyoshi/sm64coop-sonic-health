@@ -8,6 +8,8 @@ gGlobalSyncTable.loseringsonlevelchange = true --whether to lose rings on level 
 gPlayerSyncTable[0].losingrings = 0 --rings to deduct from the coin counter for a player
 gGlobalSyncTable.ringscrushinstadeath = true --whether to instantly die when crushed
 gGlobalSyncTable.decreasecoincounter = true --whether to decrease the coin counter on hit and have coins spawned on hit equal 1 coin or have the coin counter not decease on hit and have coins spawned only count for the ring counter
+gPlayerSyncTable[0].shieldhits = 0  --current number of hits remaining for current shield
+gGlobalSyncTable.recoveryheartshield = true --whether recovery hearts should give an overshield on touch
 
 
 --- @param o Object
@@ -33,6 +35,16 @@ end
 
 function bhv_coinring_loop(obj)
 	bhv_moving_yellow_coin_loop()
+end
+
+
+function bhv_sonicshield_heart_loop(obj)
+	if (gMarioStates[0].playerIndex ~= 0) or gGlobalSyncTable.recoveryheartshield == false  then
+
+	elseif (nearest_interacting_mario_state_to_object(obj)).playerIndex == 0 and is_within_100_units_of_mario(obj.oPosX, obj.oPosY, obj.oPosZ) == 1 then
+		gPlayerSyncTable[0].shieldhits = 1
+		djui_chat_message_create('you got a 1 hit shield')
+	end
 end
 
 --determines what happens on level start
@@ -91,7 +103,11 @@ function spawn_coin(m)
 	m.invincTimer = 60
 	local angle = 0
 
-	if ringcount == 0 then
+	if  gPlayerSyncTable[0].shieldhits > 0 then
+		gPlayerSyncTable[0].shieldhits = gPlayerSyncTable[0].shieldhits - 1
+		djui_chat_message_create('your shield took the hit')
+		return
+	elseif ringcount == 0 then
 		m.health = 0xff
 		return
 	end
@@ -142,11 +158,13 @@ function sonicCoinGet(m, o,interactType)
     elseif (m.playerIndex == 0) then
 		if interactType == INTERACT_COIN and (o.oDamageOrCoinValue == 1 or (get_id_from_behavior(o.behavior) == id_bhvCoinring) )  then --checking that a yellow coin was interacted with
 			ringcount = ringcount + 1
+			m.healCounter = 0
 		elseif interactType == INTERACT_COIN and o.oDamageOrCoinValue == 2 then --checking that a red coin was interacted with
 			ringcount = ringcount + 2
-			
+			m.healCounter = 0
 		elseif interactType == INTERACT_COIN and o.oDamageOrCoinValue == 5  then--checking that a blue coin was interacted with
 			ringcount = ringcount + 5
+			m.healCounter = 0
 		else 
 			sonicHurt(m,o,interactType)
 		end
@@ -248,6 +266,7 @@ function on_player_connected(m)
 	for i=0,(MAX_PLAYERS-1) do
 		if gPlayerSyncTable[i].losingrings == nil then
 			gPlayerSyncTable[i].losingrings = 0
+			gPlayerSyncTable[i].shieldhits = 0
 		end
 
     end
@@ -342,6 +361,24 @@ function decreasecoincounter_command(msg)
     return false
 end
 
+function recoveryheartshield_command(msg)
+    if not network_is_server() then
+        djui_chat_message_create('Only the host can change this setting!')
+        return true
+    end
+
+    if msg == 'on' then
+        djui_chat_message_create('recoveryheartshield is \\#00C7FF\\on\\#ffffff\\!')
+		gGlobalSyncTable.recoveryheartshield = true 
+        return true
+	elseif msg == 'off' then
+		djui_chat_message_create('recoveryheartshield is \\#A02200\\off\\#ffffff\\!')
+		gGlobalSyncTable.recoveryheartshield = false 
+		return true
+    end
+    return false
+end
+
 hook_event(HOOK_ON_LEVEL_INIT, ringInitialize) --hook for setting coins to 0 on level change
 hook_event(HOOK_ON_INTERACT, sonicCoinGet) --hook for interacting with coins
 hook_event(HOOK_ON_HUD_RENDER, ringDisplay) -- hook for displaying ring count
@@ -352,6 +389,7 @@ hook_event(HOOK_ON_DEATH, mario_death) -- hook for mario dying
 hook_event(HOOK_ON_PLAYER_CONNECTED, on_player_connected) -- hook for player joining
 
 id_bhvCoinring = hook_behavior(nil, OBJ_LIST_LEVEL, true, bhv_coinring_init, bhv_coinring_loop)
+hook_behavior(id_bhvRecoveryHeart, OBJ_LIST_LEVEL, false, nil, bhv_sonicshield_heart_loop)
 --hook_on_sync_table_change(gPlayerSyncTable, 'losingrings', 'tag', on_testing_field_changed)
 
 hook_chat_command('friendlyringloss', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn friendlyringloss \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to lose rings due to other players hitting you", friendlyringloss_command)
@@ -360,3 +398,4 @@ hook_chat_command('maxringloss', "maxringloss [number] this sets the max number 
 hook_chat_command('loseringsonlevelchange', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn loseringsonlevelchange \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to keep your rings between levels", loseringsonlevelchange_command)
 hook_chat_command('ringscrushinstadeath', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn ringscrushinstadeath \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want being crushed to be instadeath", ringscrushinstadeath_command)
 hook_chat_command('decreasecoincounter', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn decreasecoincounter \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if whether to decrease the coin counter on hit and have coins spawned on hit equal 1 coin or have the coin counter not decease on hit and have coins spawned only count for the ring counter", decreasecoincounter_command)
+hook_chat_command('recoveryheartshield', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn recoveryheartshield \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose whether recovery hearts should give an overshield on touch ", recoveryheartshield_command)
