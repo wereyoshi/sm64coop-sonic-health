@@ -1,6 +1,7 @@
 -- name: .Sonic Health
 -- description: Makes you lose coins on hit if you have no coins on hit you die \nCreated by wereyoshi. \n\nExtra coding by \\#00ffff\\steven.
- 
+-- pausable: true
+
 local ringcount = 0 --the number of rings the local player has
 gGlobalSyncTable.friendlyringloss = false --whether other players can cause you to lose rings
 gGlobalSyncTable.maxringloss = 0 --maximum amount of rings you are allowed to lose at once if its equal to 0 you lose all rings at once
@@ -27,13 +28,23 @@ local supermovesetfunctions = {}--functions that tell other movesets that you ar
 local superformfunctiontablelength = 0 --the number of functions in supermovesetfunctions
 local bool_to_str = {[false] = "\\#A02200\\off\\#ffffff\\",[true] = "\\#00C7FF\\on\\#ffffff\\"} --table for converting boolean into string
 local bool_to_num = {[false] = 0,[true] = 1} --table for converting boolean into numbers
-local version = "2.2.0" --string containing the sonic health version
+local version = "2.3.0" --string containing the sonic health version
 local settingsuperbutton = false --used for checking if the local player is setting the 1st super button
 local movingui = false --used for checking if the local player is moving the ui with the dpad
 local set2ndsuperbutton = false --used for checking if the local player is setting the 2nd super button
 local allycheck --a function used for checking if a player is on a team set through _G.sonichealth.addallycheck 
 local lastnumcoin --the last m.numCoins value the local player had used for detecting coin changes from objects with interacttype 0
 local lastcoinobj --the last coin obj touched
+
+local sonichealthconfig_command --this is the function for save server settings or loading them
+local sonichealthsuperbutton_command --this is the function for changing the super button
+local disablelavabounce_command --this function toggles the ability to lava bounce
+local friendlyringloss_command --this function toggles ring loss by pvp
+local loseringsonlevelchange_command --this function toggles whether to lose rings on level change
+local ringscrushinstadeath_command --this function toggles being crushed being an instadeath
+local decreasecoincounter_command --this function toggles whether to decrease the coin counter on hit
+local recoveryheartshield_command --this function toggles recovery heart shield
+local sonicfalldamage_command --this function toggles fall damage
 
 local buttons = {--doubly linked list of the different buttons
     [A_BUTTON] = {name = "A ",prev = nil ,next = B_BUTTON},
@@ -66,9 +77,17 @@ local usingcoopdx = 0 --variable used to check for coopdx if 0 then the local pl
 if  get_coop_compatibility_enabled ~= nil then --if the local user is using coopdx
     if get_coop_compatibility_enabled() == true then --if the local user is using coopdx's coop compatibility mode
         usingcoopdx = 1 --coop compatibility is on
+    elseif SM64COOPDX_VERSION >= "1.0.0" then --excoop and coopdx merger
+        usingcoopdx = 3
     else
         usingcoopdx = 2 --coop compatibility is off
     end
+elseif SM64COOPDX_VERSION ~= nil then--if the local user is using a version of coopdx without the get_coop_compatibility_enabled function
+	if gControllers == nil then --sm64coopdx v0.1 and sm64coopdx  v0.1.2 check
+		usingcoopdx = 1
+	else --versions of sm64coopdx after sm64coopdx v0.2 would use this since coop compatability would be deprecated
+		usingcoopdx = 3 --post excoop and coopdx merge
+	end
 end
 
 --table containg the different shield types
@@ -291,7 +310,6 @@ local function sonicCoinGet(m, o,interactType)
 			lastnumcoin = m.numCoins
 			lastcoinobj = o
 		end
-		
     end
 end
 
@@ -718,6 +736,144 @@ local function modsupport()
 	elseif _G.Arena ~= nil then
 		_G.sonichealth.addcustomenemyfunction(arenaitempickup,bhvArenaCustom002,"nointeract") --adding an interaction for arena's item pickup object
     end
+	if _G.charSelect ~= nil then --if the character select mod is on
+		if _G.charSelect.credit_add ~= nil then
+            _G.charSelect.credit_add(string.format("sonic health version %s", version),"wereyoshi","sonic health mod maker")
+			_G.charSelect.credit_add(string.format("sonic health version %s", version),"steven.","code helper")
+		end
+	end
+	if servermodsync then --if using coopdx after the merge
+		if (mod_storage_load("friendlyringloss") == nil) or (mod_storage_load("loseringsonlevelchange") == nil) or (mod_storage_load("ringscrushinstadeath") == nil) or (mod_storage_load("decreasecoincounter") == nil) or (mod_storage_load("recoveryheartshield") == nil) or (mod_storage_load("sonicfalldamage") == nil) or (mod_storage_load("sonicsuperallow") == nil) or (mod_storage_load("maxringloss") == nil) or (mod_storage_load("maxrecollectablerings") == nil) then
+			mod_storage_save_bool("friendlyringloss", gGlobalSyncTable.friendlyringloss)
+			mod_storage_save_bool("loseringsonlevelchange", true)
+			mod_storage_save_bool("ringscrushinstadeath", true)
+			mod_storage_save_bool("decreasecoincounter", true)
+			mod_storage_save_bool("recoveryheartshield", true)
+			mod_storage_save_bool("sonicfalldamage", gGlobalSyncTable.sonicfalldamage)
+			mod_storage_save_bool("sonicsuperallow", gGlobalSyncTable.sonicsuperallow)
+			mod_storage_save_number("maxringloss", gGlobalSyncTable.maxringloss)
+			mod_storage_save_number("maxrecollectablerings", 999)
+		else
+			gGlobalSyncTable.friendlyringloss = mod_storage_load_bool("friendlyringloss")
+			gGlobalSyncTable.loseringsonlevelchange = mod_storage_load_bool("loseringsonlevelchange")
+			gGlobalSyncTable.ringscrushinstadeath = mod_storage_load_bool("ringscrushinstadeath")
+			gGlobalSyncTable.decreasecoincounter = mod_storage_load_bool("decreasecoincounter")
+			gGlobalSyncTable.recoveryheartshield = mod_storage_load_bool("recoveryheartshield")
+			gGlobalSyncTable.sonicfalldamage = mod_storage_load_bool("sonicfalldamage")
+			gGlobalSyncTable.sonicsuperallow = mod_storage_load_bool("sonicsuperallow")
+			gGlobalSyncTable.maxringloss =  mod_storage_load_number("maxringloss")
+			gGlobalSyncTable.maxrecollectablerings = mod_storage_load_number("maxrecollectablerings")
+		end
+		if (mod_storage_load("superstarreq") == nil) or (mod_storage_load("superstarsetting") == nil) or (mod_storage_load("disablelavabounce") == nil) then
+			mod_storage_save_number("superstarsetting",gGlobalSyncTable.superstarsetting)
+			mod_storage_save_number("superstarreq",gGlobalSyncTable.superstarreq)
+			mod_storage_save_bool("disablelavabounce", false)
+		else
+			gGlobalSyncTable.superstarsetting = mod_storage_load_number("superstarsetting")
+			gGlobalSyncTable.superstarreq = mod_storage_load_number("superstarreq")
+			gGlobalSyncTable.disablelavabounce = toboolean( mod_storage_load("disablelavabounce"))
+		end
+		hook_mod_menu_button("print sonic health server config",function(index)
+            sonichealthconfig_command('printserver')
+        end)
+        hook_mod_menu_button("print sonic health server config",function(index)
+            sonichealthconfig_command('printlocal')
+        end)
+
+        hook_mod_menu_button("save current sonic health config",function(index)
+            sonichealthconfig_command('save')
+        end)
+        hook_mod_menu_button("load sonic health config",function(index)
+            sonichealthconfig_command('load')
+        end)
+		hook_mod_menu_button("save current sonic health super pref",function(index)
+            sonichealthconfig_command('savesuperpreqpref')
+        end)
+		hook_mod_menu_button("load sonic health super pref",function(index)
+            sonichealthconfig_command('loadsuperpreqpref')
+        end)
+		hook_mod_menu_button("toggle bounce on lava",function(index)
+            local s
+            if gGlobalSyncTable.disablelavabounce then
+                s = 'off'
+            else
+                s = 'on'
+            end
+            disablelavabounce_command(s)
+        end)
+		hook_mod_menu_button("toggle friendly ring loss",function(index)
+            local s
+            if gGlobalSyncTable.friendlyringloss then
+                s = 'off'
+            else
+                s = 'on'
+            end
+            friendlyringloss_command(s)
+        end)
+		hook_mod_menu_button("toggle ring loss on level change",function(index)
+            local s
+            if gGlobalSyncTable.loseringsonlevelchange then
+                s = 'off'
+            else
+                s = 'on'
+            end
+            loseringsonlevelchange_command(s)
+        end)
+		hook_mod_menu_button("toggle crushing being instadeath",function(index)
+            local s
+            if gGlobalSyncTable.ringscrushinstadeath then
+                s = 'off'
+            else
+                s = 'on'
+            end
+            ringscrushinstadeath_command(s)
+        end)
+		hook_mod_menu_button("toggle losing rings decreasing coin counter",function(index)
+            local s
+            if gGlobalSyncTable.decreasecoincounter then
+                s = 'off'
+            else
+                s = 'on'
+            end
+            decreasecoincounter_command(s)
+        end)
+		hook_mod_menu_button("toggle recovery hearts giving shields",function(index)
+            local s
+            if gGlobalSyncTable.recoveryheartshield then
+                s = 'off'
+            else
+                s = 'on'
+            end
+            recoveryheartshield_command(s)
+        end)
+		hook_mod_menu_button("toggle fall damage",function(index)
+            local s
+            if gGlobalSyncTable.sonicfalldamage then
+                s = 'off'
+            else
+                s = 'on'
+            end
+            sonicfalldamage_command(s)
+        end)
+		
+		hook_mod_menu_checkbox("change sonic health super button",false,function(index,value)
+            
+            if value then
+                if (settingsuperbutton == false) and (set2ndsuperbutton == false) then
+                    settingsuperbutton = value
+                end
+            end
+        end)
+		hook_mod_menu_checkbox("toggle sonichealth ui",false,function(index,value)
+            toggleui = value
+        end)
+		if _G.cheatsApi ~= nil then
+            hook_mod_menu_button("999 rings",function(index)
+				ringcount = 999
+			end)
+        end
+
+	end
 end
 
 --- @param m MarioState
@@ -789,6 +945,13 @@ function on_player_connected(m)
 			end
 		end
         servermodsync = true
+		if usingcoopdx == 0 then
+			log_to_console('You are using a version of excoop before the merging of coopdx and excoop some features are unavailable')
+			log_to_console('To use some features of this mod you need to update at https://sm64coopdx.com/ or https://github.com/coop-deluxe/sm64coopdx/releases')
+		else
+			log_to_console('You are using a version of coopdx before the merging of coopdx and excoop some features are unavailable',2)
+			log_to_console('To use some features of this mod you need to update at https://sm64coopdx.com/ or https://github.com/coop-deluxe/sm64coopdx/releases',2)
+		end
     end
 	for i=0,(MAX_PLAYERS-1) do
 		if gPlayerSyncTable[i].losingrings == nil then
@@ -802,7 +965,17 @@ end
 
 --Called when the local player finishes the join process (if the player isn't the host)
 local function on_join()
-    modsupport()
+	if servermodsync == false then
+    	modsupport()
+		servermodsync = true
+		if usingcoopdx == 0 then
+			log_to_console('You are using a version of excoop before the merging of coopdx and excoop some features are unavailable')
+			log_to_console('To use some features of this mod you need to update at https://sm64coopdx.com/ or https://github.com/coop-deluxe/sm64coopdx/releases')
+		else
+			log_to_console('You are using a version of coopdx before the merging of coopdx and excoop some features are unavailable',2)
+			log_to_console('To use some features of this mod you need to update at https://sm64coopdx.com/ or https://github.com/coop-deluxe/sm64coopdx/releases',2)
+		end
+	end
 end
 
 ---@param m MarioState
@@ -870,7 +1043,7 @@ end
 
 ---@param m MarioState
 ---@param hazardType integer
---this function is for allowing mario to interact with objects.
+--Called once per player per frame. Return false to prevent the player from being affected by lava or quicksand.
 local function allow_hazard_surface(m,hazardType)
 	if m.playerIndex ~= 0 then
 		return
@@ -885,13 +1058,12 @@ local function allow_hazard_surface(m,hazardType)
 			return
 		end
 
-        
     end
 end
 
 --- @param msg string
 --this function toggles ring loss by pvp
-local function friendlyringloss_command(msg)
+friendlyringloss_command = function(msg)
     if not network_is_server() then
         djui_chat_message_create('Only the host can change this setting!')
         return true
@@ -930,7 +1102,7 @@ end
 
 --- @param msg string
 --this function toggles whether to lose rings on level change
-local function loseringsonlevelchange_command(msg)
+loseringsonlevelchange_command = function(msg)
     if not network_is_server() then
         djui_chat_message_create('Only the host can change this setting!')
         return true
@@ -951,7 +1123,7 @@ end
 
 --- @param msg string
 --this function toggles being crushed being an instadeath
-local function ringscrushinstadeath_command(msg)
+ringscrushinstadeath_command = function(msg)
     if not network_is_server() then
         djui_chat_message_create('Only the host can change this setting!')
         return true
@@ -972,7 +1144,7 @@ end
 
 --- @param msg string
 --this function toggles whether to decrease the coin counter on hit
-local function decreasecoincounter_command(msg)
+decreasecoincounter_command = function(msg)
     if not network_is_server() then
         djui_chat_message_create('Only the host can change this setting!')
         return true
@@ -993,7 +1165,7 @@ end
 
 --- @param msg string
 --this function toggles recovery heart shield
-local function recoveryheartshield_command(msg)
+recoveryheartshield_command = function(msg)
     if not network_is_server() then
         djui_chat_message_create('Only the host can change this setting!')
         return true
@@ -1014,7 +1186,7 @@ end
 
 --- @param msg string
 --this function toggles fall damage
-local function sonicfalldamage_command(msg)
+sonicfalldamage_command = function(msg)
     if not network_is_server() then
         djui_chat_message_create('Only the host can change this setting!')
         return true
@@ -1152,7 +1324,7 @@ end
 
 --- @param msg string
 --this is the function for save server settings or loading them
-local function sonichealthconfig_command(msg)
+sonichealthconfig_command = function(msg)
 	local m = string.lower(msg)
     if m == 'save' then
 		if usingcoopdx == 0 then
@@ -1284,7 +1456,7 @@ end
 
 --- @param msg string
 --this is the function for changing the super button
-local function sonichealthsuperbutton_command(msg)
+sonichealthsuperbutton_command = function(msg)
     local m = string.lower(msg)
     if m == 'reset' then
         djui_chat_message_create('sonichealth super button was set to default')
@@ -1304,7 +1476,7 @@ end
 
 --- @param msg string
 --this function toggles the ability to lava bounce
-local function disablelavabounce_command(msg)
+disablelavabounce_command = function(msg)
     if not network_is_server() then
         djui_chat_message_create('Only the host can change this setting!')
         return true
@@ -1341,9 +1513,11 @@ hook_event(HOOK_ALLOW_HAZARD_SURFACE, allow_hazard_surface) --Called once per pl
 id_bhvCoinring = hook_behavior(nil, OBJ_LIST_LEVEL, true, bhv_coinring_init, bhv_coinring_loop)--The behavior for sonic health's rings
 hook_behavior(id_bhvRecoveryHeart, OBJ_LIST_LEVEL, false, nil, bhv_sonicshield_heart_loop)
 
-hook_chat_command('friendlyringloss', "[on|off] turn friendlyringloss \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to lose rings due to other players hitting you.", friendlyringloss_command)
 hook_chat_command('maxringloss', "maxringloss [number] this sets the max number of rings you can lose at once set it to 0 to always lose all rings.", maxringloss_command)
-
+hook_chat_command('sonichealthconfig', "[save|load|savesuperpreqpref|loadsuperpreqpref|printserver|printlocal] to save the current sonic health settings to a file or load them (loading only works if used by a moderator or the server)", sonichealthconfig_command)
+hook_chat_command('sonichealthsuperbutton', "[reset|change] set the button/buttons to turn super, reset sets it back to default(default x) and change allows you to change it ", sonichealthsuperbutton_command)
+hook_chat_command('disablelavabounce', "[on|off] turn disablelavabounce \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to lava bounce on lava.", disablelavabounce_command)
+hook_chat_command('friendlyringloss', "[on|off] turn friendlyringloss \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to lose rings due to other players hitting you.", friendlyringloss_command)
 hook_chat_command('loseringsonlevelchange', "[on|off] turn loseringsonlevelchange \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to keep your rings between levels.", loseringsonlevelchange_command)
 hook_chat_command('ringscrushinstadeath', "[on|off] turn ringscrushinstadeath \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want being crushed to be instadeath.", ringscrushinstadeath_command)
 hook_chat_command('decreasecoincounter', "[on|off] turn decreasecoincounter on or off to choose whether to decrease the coin counter on hit and rings equal 1 coin or have the coin counter not decease on hit and rings only affect ring counter", decreasecoincounter_command)
@@ -1353,9 +1527,6 @@ hook_chat_command('maxrecollectablerings', "maxrecollectablerings [number] this 
 hook_chat_command('ringui_x', "ringui_x [number|dpad|toggleui] this sets the x position of the ring counter should be a value  between 0 and 320, ringui_x \\#A02200\\dpad\\#ffffff\\ for moving the ui with dpad,or ringui_x toggleui to toggle the ui", ringui_x_command)
 hook_chat_command('ringui_y', "ringui_y [number|dpad|toggleui] this sets the y position of the ring counter should be a value between 0 and  -240, ringui_y \\#A02200\\dpad\\#ffffff\\ for moving the ui with dpad,or ringui_y toggleui to toggle the ui", ringui_y_command)
 hook_chat_command('sonicsuper', "[on|off|prereq|7coinstar|number] toggle the ability to go super with 50+ rings + requirement, get the requirement by typing prereq ,change prereq by entering number of stars needed or entering 7coinstar to make super require 7 100 coin stars.", sonicsuper_command)
-hook_chat_command('sonichealthconfig', "[save|load|savesuperpreqpref|loadsuperpreqpref|printserver|printlocal] to save the current sonic health settings to a file or load them (loading only works if used by a moderator or the server)", sonichealthconfig_command)
-hook_chat_command('sonichealthsuperbutton', "[reset|change] set the button/buttons to turn super, reset sets it back to default(default x) and change allows you to change it ", sonichealthsuperbutton_command)
-hook_chat_command('disablelavabounce', "[on|off] turn disablelavabounce \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to lava bounce on lava.", disablelavabounce_command)
 
 
 --sonic health mod api functions
@@ -1571,6 +1742,14 @@ _G.sonichealth = {
 		return version
 	end
 }
+
+if usingcoopdx == 3 then
+    hook_event(HOOK_ON_MODS_LOADED, modsupport) --Called directly after every mod file is loaded in by smlua
+    servermodsync = true
+else
+	
+
+end
 
 --below are some examples of using the mod api in another mod
 --[[ 
