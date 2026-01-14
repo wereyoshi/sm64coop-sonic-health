@@ -1,5 +1,5 @@
--- name: sonic health
--- description: makes you lose coins on hit if you have no coins on hit you die \nCreated by wereyoshi.
+-- name: Sonic Health
+-- description: Makes you lose coins on hit if you have no coins on hit you die \nCreated by wereyoshi. \n\nExtra coding by \\#00ffff\\steven.
 
 local ringcount = 0
 gGlobalSyncTable.friendlyringloss = false --whether other players can cause you to lose rings
@@ -34,16 +34,17 @@ function bhv_coinring_init(o)
 end
 
 function bhv_coinring_loop(obj)
+	bhv_yellow_coin_loop()
 	bhv_moving_yellow_coin_loop()
 end
 
 
 function bhv_sonicshield_heart_loop(obj)
 	if (gMarioStates[0].playerIndex ~= 0) or gGlobalSyncTable.recoveryheartshield == false  then
-
+		return
 	elseif (nearest_interacting_mario_state_to_object(obj)).playerIndex == 0 and is_within_100_units_of_mario(obj.oPosX, obj.oPosY, obj.oPosZ) == 1 then
 		gPlayerSyncTable[0].shieldhits = 1
-		djui_chat_message_create('you got a 1 hit shield')
+		djui_chat_message_create('You got a 1-hit shield.')
 	end
 end
 
@@ -101,11 +102,10 @@ function spawn_coin(m)
 	local radius = 256
 	m.hurtCounter = 0
 	m.invincTimer = 60
-	local angle = 0
 
 	if  gPlayerSyncTable[0].shieldhits > 0 then
 		gPlayerSyncTable[0].shieldhits = gPlayerSyncTable[0].shieldhits - 1
-		djui_chat_message_create('your shield took the hit')
+		djui_chat_message_create('Your shield took the hit.')
 		return
 	elseif ringcount == 0 then
 		m.health = 0xff
@@ -114,8 +114,13 @@ function spawn_coin(m)
 
 	if (gGlobalSyncTable.maxringloss == 0 or ringcount < gGlobalSyncTable.maxringloss) and (gGlobalSyncTable.decreasecoincounter == true) then
 		for i = 0,ringcount -1,1 do
-			angle = i* 30 * math.pi / 180
-			spawn_non_sync_object(id_bhvMovingYellowCoin, E_MODEL_YELLOW_COIN, (m.pos.x + math.cos(angle)*(radius)),  (m.pos.y + 128 ), (m.pos.z + math.sin(angle)*(radius)), nil)
+			spawn_non_sync_object(
+			id_bhvMovingYellowCoin,
+			E_MODEL_YELLOW_COIN,
+			m.pos.x, m.pos.y, m.pos.z,
+			function (coin)
+				return ring_randomization(coin)
+			end)
 		end
 		for i = 0,MAX_PLAYERS - 1,1 do
 			if gNetworkPlayers[i].currLevelNum == gNetworkPlayers[0].currLevelNum and gNetworkPlayers[i].currActNum == gNetworkPlayers[0].currActNum then
@@ -125,8 +130,13 @@ function spawn_coin(m)
 		ringcount = 0
 	elseif (gGlobalSyncTable.decreasecoincounter == true) then
 		for i = 0,gGlobalSyncTable.maxringloss -1,1 do
-			angle = i* 30 * math.pi / 180
-			spawn_non_sync_object(id_bhvMovingYellowCoin, E_MODEL_YELLOW_COIN, (m.pos.x + math.cos(angle)*(radius)),  (m.pos.y + 128 ), (m.pos.z + math.sin(angle)*(radius)), nil)
+			spawn_non_sync_object(
+			id_bhvMovingYellowCoin,
+			E_MODEL_YELLOW_COIN,
+			m.pos.x, m.pos.y, m.pos.z,
+			function (coin)
+				return ring_randomization(coin)
+			end)
 		end
 		for i = 0,MAX_PLAYERS - 1,1 do
 			if gNetworkPlayers[i].currLevelNum == gNetworkPlayers[0].currLevelNum and gNetworkPlayers[i].currActNum == gNetworkPlayers[0].currActNum then
@@ -136,17 +146,34 @@ function spawn_coin(m)
 		ringcount = ringcount - gGlobalSyncTable.maxringloss
 	elseif (gGlobalSyncTable.maxringloss == 0 or ringcount < gGlobalSyncTable.maxringloss) and (gGlobalSyncTable.decreasecoincounter == false) then
 			for i = 0,ringcount -1,1 do
-				angle = i* 30 * math.pi / 180
-				spawn_non_sync_object(id_bhvCoinring, E_MODEL_YELLOW_COIN, (m.pos.x + math.cos(angle)*(radius)),  (m.pos.y + 128 ), (m.pos.z + math.sin(angle)*(radius)), nil)
+				spawn_non_sync_object(
+				id_bhvCoinring,
+				E_MODEL_YELLOW_COIN,
+				m.pos.x, m.pos.y, m.pos.z,
+				function (coin)
+				    return ring_randomization(coin)
+				end)
 			end
 			ringcount = 0
 		elseif (gGlobalSyncTable.decreasecoincounter == false) then
 			for i = 0,gGlobalSyncTable.maxringloss -1,1 do
-				angle = i* 30 * math.pi / 180
-				spawn_non_sync_object(id_bhvCoinring, E_MODEL_YELLOW_COIN, (m.pos.x + math.cos(angle)*(radius)),  (m.pos.y + 128 ), (m.pos.z + math.sin(angle)*(radius)), nil)
+				spawn_non_sync_object(
+				id_bhvCoinring,
+				E_MODEL_YELLOW_COIN,
+				m.pos.x, m.pos.y, m.pos.z,
+				function (coin)
+				    return ring_randomization(coin)
+				end)
 			end
 			ringcount = ringcount - gGlobalSyncTable.maxringloss
 	end
+end
+
+-- randomize velocity and angle of the rings
+function ring_randomization(obj)
+	obj.oVelY = math.random(30, 50)
+	obj.oForwardVel = math.random(5, 10)
+	obj.oMoveAngleYaw = math.random(0x0000, 0x10000)
 end
 
 ---@param m MarioState 
@@ -279,7 +306,7 @@ function friendlyringloss_command(msg)
     end
 
     if msg == 'on' then
-        djui_chat_message_create('friendly ring loss is \\#00C7FF\\on\\#ffffff\\!')
+        djui_chat_message_create('Friendly ring loss is \\#00C7FF\\on\\#ffffff\\!')
 		gGlobalSyncTable.friendlyringloss = true 
         return true
 	elseif msg == 'off' then
@@ -298,10 +325,10 @@ function maxringloss_command(msg)
 
     if tonumber(msg) and (tonumber(msg) >= 0) then
 		gGlobalSyncTable.maxringloss = tonumber(msg)
-        djui_chat_message_create(string.format("max ring loss is now %d", gGlobalSyncTable.maxringloss))
+        djui_chat_message_create(string.format("Max ring loss is now %d", gGlobalSyncTable.maxringloss))
         return true
 	else 
-		djui_chat_message_create('invalid input must be a number like maxringloss 5 and the number needs to be 0 or greater')
+		djui_chat_message_create('Invalid input. Must be a number like maxringloss 5 and the number needs to be 0 or greater.')
 		return true
     end
     return false
@@ -314,11 +341,11 @@ function loseringsonlevelchange_command(msg)
     end
 
     if msg == 'on' then
-        djui_chat_message_create('lose rings on level change is \\#00C7FF\\on\\#ffffff\\!')
+        djui_chat_message_create('Lose rings on level change is \\#00C7FF\\on\\#ffffff\\!')
 		gGlobalSyncTable.loseringsonlevelchange = true 
         return true
 	elseif msg == 'off' then
-		djui_chat_message_create('lose ringson level change is \\#A02200\\off\\#ffffff\\!')
+		djui_chat_message_create('Lose ringson level change is \\#A02200\\off\\#ffffff\\!')
 		gGlobalSyncTable.loseringsonlevelchange = false 
 		return true
     end
@@ -332,11 +359,11 @@ function ringscrushinstadeath_command(msg)
     end
 
     if msg == 'on' then
-        djui_chat_message_create('crushed instadeath is \\#00C7FF\\on\\#ffffff\\!')
+        djui_chat_message_create('Crushed instadeath is \\#00C7FF\\on\\#ffffff\\!')
 		gGlobalSyncTable.ringscrushinstadeath = true 
         return true
 	elseif msg == 'off' then
-		djui_chat_message_create('crushed instadeath is \\#A02200\\off\\#ffffff\\!')
+		djui_chat_message_create('Crushed instadeath is \\#A02200\\off\\#ffffff\\!')
 		gGlobalSyncTable.ringscrushinstadeath = false 
 		return true
     end
@@ -350,11 +377,11 @@ function decreasecoincounter_command(msg)
     end
 
     if msg == 'on' then
-        djui_chat_message_create('decreasecoincounter is \\#00C7FF\\on\\#ffffff\\!')
+        djui_chat_message_create('\\#00C7FF\\The coin counter will now decrease if you take a hit\\#ffffff\\!')
 		gGlobalSyncTable.decreasecoincounter = true 
         return true
 	elseif msg == 'off' then
-		djui_chat_message_create('decreasecoincounter is \\#A02200\\off\\#ffffff\\!')
+		djui_chat_message_create('\\#A02200\\The coin counter will no longer decrease if you take a hit\\#ffffff\\!')
 		gGlobalSyncTable.decreasecoincounter = false 
 		return true
     end
@@ -368,11 +395,11 @@ function recoveryheartshield_command(msg)
     end
 
     if msg == 'on' then
-        djui_chat_message_create('recoveryheartshield is \\#00C7FF\\on\\#ffffff\\!')
+        djui_chat_message_create('\\#00C7FF\\Recovery hearts will now give shields\\#ffffff\\!')
 		gGlobalSyncTable.recoveryheartshield = true 
         return true
 	elseif msg == 'off' then
-		djui_chat_message_create('recoveryheartshield is \\#A02200\\off\\#ffffff\\!')
+		djui_chat_message_create('\\#A02200\\Recovery hearts will no longer give shields\\#ffffff\\!')
 		gGlobalSyncTable.recoveryheartshield = false 
 		return true
     end
