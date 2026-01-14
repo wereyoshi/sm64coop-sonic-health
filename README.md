@@ -57,3 +57,8 @@ isplayersuper --this function returns whether a player is super
 
 deprecated addsuperenemyfunction--this function allows other mod's objects to have unique interactions with super forms use addcustomenemyfunction instead
   </details>
+  
+  <details>
+  <summary>credits</summary>
+steven3004- making rings fling out of your position instead of spawning around your position
+ </details>
