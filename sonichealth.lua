@@ -1,4 +1,4 @@
--- name: Sonic Health
+-- name: .Sonic Health
 -- description: Makes you lose coins on hit if you have no coins on hit you die \nCreated by wereyoshi. \n\nExtra coding by \\#00ffff\\steven.
 
 local ringcount = 0
@@ -12,14 +12,59 @@ gGlobalSyncTable.decreasecoincounter = true --whether to decrease the coin count
 gPlayerSyncTable[0].shieldhits = 0  --current number of hits remaining for current shield
 gGlobalSyncTable.recoveryheartshield = true --whether recovery hearts should give an overshield on touch
 gGlobalSyncTable.sonicfalldamage = false --toggles fall damage
+gGlobalSyncTable.sonicsuperallow = false --toggles super forms
+gPlayerSyncTable[0].issuper = false  --if the current player is super
+gGlobalSyncTable.superstarreq = 50 --min number of stars for super
+local timer = 0
+local superformfunction = nil
+
+local supermovesetfunctions = {}--functions that tell other movesets that you are super
+local superformfunctiontablelength = 0
+local bool_to_str = {[false] = "\\#A02200\\off\\#ffffff\\",[true] = "\\#00C7FF\\on\\#ffffff\\"} --table for converting boolean into string
+local superenemyfunctions = {}--table of functions from other mods for unique super interactions with objects with each key being a behaviorid
+local version = "2.0.0"
+
+
+local function toboolean(s)
+    if s == "false" then
+        return false
+    else
+        return true
+    end
+end
 
 if mod_storage_load("ringcount_ui_x") == nil or mod_storage_load("ringcount_ui_y") == nil then
 	mod_storage_save("ringcount_ui_x", "0")
 	mod_storage_save("ringcount_ui_y", "0")
 end
 
-	local ringui_x = tonumber(mod_storage_load("ringcount_ui_x"))
-	local ringui_y = tonumber(mod_storage_load("ringcount_ui_y"))
+local ringui_x = tonumber(mod_storage_load("ringcount_ui_x"))
+local ringui_y = tonumber(mod_storage_load("ringcount_ui_y"))
+
+if network_is_server() then
+    if (mod_storage_load("friendlyringloss") == nil) or (mod_storage_load("loseringsonlevelchange") == nil) or (mod_storage_load("ringscrushinstadeath") == nil) or (mod_storage_load("decreasecoincounter") == nil) or (mod_storage_load("recoveryheartshield") == nil) or (mod_storage_load("sonicfalldamage") == nil) or (mod_storage_load("sonicsuperallow") == nil) or (mod_storage_load("maxringloss") == nil) or (mod_storage_load("maxrecollectablerings") == nil) then
+        mod_storage_save("friendlyringloss", tostring(gGlobalSyncTable.friendlyringloss))
+        mod_storage_save("loseringsonlevelchange", tostring(gGlobalSyncTable.loseringsonlevelchange))
+        mod_storage_save("ringscrushinstadeath", tostring(gGlobalSyncTable.ringscrushinstadeath))
+        mod_storage_save("decreasecoincounter", tostring(gGlobalSyncTable.decreasecoincounter))
+        mod_storage_save("recoveryheartshield", tostring(gGlobalSyncTable.recoveryheartshield))
+        mod_storage_save("sonicfalldamage", tostring(gGlobalSyncTable.sonicfalldamage))
+        mod_storage_save("sonicsuperallow", tostring(gGlobalSyncTable.sonicsuperallow))
+		mod_storage_save("maxringloss", tostring(gGlobalSyncTable.maxringloss))
+        mod_storage_save("maxrecollectablerings", tostring(gGlobalSyncTable.maxrecollectablerings))
+    else
+        gGlobalSyncTable.friendlyringloss = toboolean( mod_storage_load("friendlyringloss"))
+		gGlobalSyncTable.loseringsonlevelchange = toboolean( mod_storage_load("loseringsonlevelchange"))
+        gGlobalSyncTable.ringscrushinstadeath = toboolean( mod_storage_load("ringscrushinstadeath"))
+        gGlobalSyncTable.decreasecoincounter = toboolean( mod_storage_load("decreasecoincounter"))
+        gGlobalSyncTable.recoveryheartshield = toboolean( mod_storage_load("recoveryheartshield"))
+        gGlobalSyncTable.sonicfalldamage = toboolean( mod_storage_load("sonicfalldamage"))
+        gGlobalSyncTable.sonicsuperallow = toboolean( mod_storage_load("sonicsuperallow"))
+		gGlobalSyncTable.maxringloss = tonumber(mod_storage_load("maxringloss"))
+        gGlobalSyncTable.maxrecollectablerings = tonumber(mod_storage_load("maxrecollectablerings"))
+    end
+
+end
 
 --- @param o Object
 function bhv_coinring_init(o)
@@ -66,33 +111,23 @@ function bhv_sonicshield_heart_loop(obj)
 end
 
 --determines what happens on level start
-function ringInitialize()
+local function ringInitialize()
 
 	if (gGlobalSyncTable.loseringsonlevelchange == true)  then
 		ringcount = 0
 	end
 end
 
-
-
----@param attacker MarioState --attacking player's MarioState 
----@param victim MarioState -- attacked player's MarioState
---determines if an attacked player loses a coin on hit or dies by another player
-function sonicPvpHurt(attacker, victim)	
-	if victim.playerIndex ~= 0 then
-        return
-	elseif (gGlobalSyncTable.friendlyringloss == false)  or ((victim.flags & MARIO_METAL_CAP) ~= 0) then
-		victim.hurtCounter = 0
-	else
-		victim.invincTimer = 0
-		spawn_coin(victim)
-	end
-
+-- randomize velocity and angle of the rings
+local function ring_randomization(obj)
+	obj.oVelY = math.random(30, 50)
+	obj.oForwardVel = math.random(5, 10)
+	obj.oMoveAngleYaw = math.random(0x0000, 0x10000)
 end
 
 --- @param m MarioState
 --this function handles coins spawned on hit, deducting spawned coins from coin counter, and reducing ring counter
-function spawn_coin(m)
+local function spawn_coin(m)
 	local radius = 256
 	m.hurtCounter = 0
 	if m.invincTimer <= 0 then
@@ -103,7 +138,9 @@ function spawn_coin(m)
 		end
 		return
 	end
-	if  gPlayerSyncTable[0].shieldhits > 0 then
+	if gPlayerSyncTable[0].issuper == true then
+		return
+	elseif  gPlayerSyncTable[0].shieldhits > 0 then
 		gPlayerSyncTable[0].shieldhits = gPlayerSyncTable[0].shieldhits - 1
 		djui_chat_message_create('Your shield took the hit.')
 		return
@@ -149,17 +186,26 @@ function spawn_coin(m)
 	end
 end
 
--- randomize velocity and angle of the rings
-function ring_randomization(obj)
-	obj.oVelY = math.random(30, 50)
-	obj.oForwardVel = math.random(5, 10)
-	obj.oMoveAngleYaw = math.random(0x0000, 0x10000)
+---@param attacker MarioState --attacking player's MarioState 
+---@param victim MarioState -- attacked player's MarioState
+--determines if an attacked player loses a coin on hit or dies by another player
+local function sonicPvpHurt(attacker, victim)	
+	if victim.playerIndex ~= 0 then
+        return
+	elseif (gGlobalSyncTable.friendlyringloss == false)  or ((victim.flags & MARIO_METAL_CAP) ~= 0) then
+		victim.hurtCounter = 0
+	else
+		victim.invincTimer = 0
+		spawn_coin(victim)
+	end
+
 end
+
 
 ---@param m MarioState 
 ---@param o Object
 --sets what happens when a character picks up a coin
-function sonicCoinGet(m, o,interactType)
+local function sonicCoinGet(m, o,interactType)
 	if (m.playerIndex ~= 0) then
 		return
     elseif (m.playerIndex == 0) then
@@ -177,7 +223,7 @@ function sonicCoinGet(m, o,interactType)
 end
 
 --sets up a clientside ring counter
-function ringDisplay()
+local function ringDisplay()
 	
     djui_hud_set_font(FONT_HUD)
     djui_hud_set_resolution(RESOLUTION_N64)
@@ -191,7 +237,7 @@ end
 
 ---@param m MarioState
 --Called once per player per frame before physics code is run
-function before_phys_step(m)
+local function before_phys_step(m)
     if (m.playerIndex ~= 0) then
 		return
 	elseif ((m.flags & MARIO_METAL_CAP) ~= 0) or (m.invincTimer ~= 0)  then
@@ -204,6 +250,50 @@ function before_phys_step(m)
 		spawn_coin(m)
 		return
     end
+
+end
+
+---@param bool boolean
+--this function toggles super form
+local function supertoggle(bool)
+	local customfunc
+	if bool == true then
+		gPlayerSyncTable[0].issuper = true
+		timer = 0
+	else
+		gPlayerSyncTable[0].issuper = false
+	end
+	if (supermovesetfunctions ~= nil) and (superformfunctiontablelength > 0) then
+		for i=0,(superformfunctiontablelength),1 do
+			customfunc = supermovesetfunctions[i]
+			if customfunc ~= nil then
+				customfunc(bool)
+			end
+		end
+	end
+end
+
+local function health_hook_update()
+
+	if gPlayerSyncTable[0].issuper == true then
+		timer = timer + 1
+		if (gGlobalSyncTable.sonicsuperallow == false) then
+			supertoggle(false)
+		elseif (timer % 30) == 0 then
+			ringcount = ringcount - 1
+			if ringcount <= 0 then
+				supertoggle(false)
+			end
+			if gGlobalSyncTable.decreasecoincounter == true then
+				for i = 0,MAX_PLAYERS - 1,1 do
+					if gNetworkPlayers[i].currLevelNum == gNetworkPlayers[0].currLevelNum and gNetworkPlayers[i].currActNum == gNetworkPlayers[0].currActNum then
+						gPlayerSyncTable[i].losingrings = gPlayerSyncTable[i].losingrings + 1
+					end
+				end
+			end
+		end
+
+	end
 
 end
 
@@ -220,6 +310,26 @@ function mario_update_end(m)
 	if (m.pos.y ~= m.floorHeight) and m.invincTimer > 0 and (m.action == ACT_FORWARD_AIR_KB or m.action == ACT_BACKWARD_AIR_KB or m.action == ACT_THROWN_BACKWARD or m.action == ACT_THROWN_FORWARD) then --making the invincibity timer not decrement until hitting the ground if in hitstun
 		m.invincTimer = m.invincTimer + 1
 	end
+
+	if (gGlobalSyncTable.sonicsuperallow == true) and((m.controller.buttonPressed & X_BUTTON) ~= 0) then
+
+		if gPlayerSyncTable[0].issuper == false and (ringcount >= 50) then
+			if (superformfunction == nil) and (m.numStars >= gGlobalSyncTable.superstarreq)  then
+				supertoggle(true)
+			elseif (superformfunction ~= nil) and superformfunction() == true then
+				supertoggle(true)
+			end
+			
+		elseif gPlayerSyncTable[0].issuper == true then
+			if ((timer % 30 ~= 0) or (timer == 0)) and (ringcount > 0) then
+				ringcount = ringcount - 1
+			end
+			supertoggle(false)
+		end
+	elseif gPlayerSyncTable[0].issuper == true then
+		m.particleFlags = m.particleFlags | PARTICLE_SPARKLES
+	end
+	
 
 	if gPlayerSyncTable[0].losingrings ~= 0 then --deducting coins from current player's coin count if their losingrings field > 0
 		m.numCoins = m.numCoins - gPlayerSyncTable[0].losingrings
@@ -259,19 +369,12 @@ end
 ---@param m MarioState
 ---@param incomingAction integer
 --this function is called before every time a player's current action is changed
-function before_set_mario_action(m,incomingAction)
-    if m.playerIndex ~= 0 or gPlayerSyncTable[0].kirby == false then
+local function before_set_mario_action(m,incomingAction)
+    if m.playerIndex ~= 0 then
         return
     end
-	if incomingAction == ACT_SQUISHED and m.hurtCounter > 0 then 
-		if (gGlobalSyncTable.ringscrushinstadeath == true) then
-			m.health = 0xff
-			m.invincTimer = 60
-		else
-			spawn_coin(m)
-			return
-		end
-	elseif (incomingAction == ACT_HARD_BACKWARD_GROUND_KB or incomingAction == ACT_HARD_FORWARD_GROUND_KB or incomingAction == ACT_BACKWARD_GROUND_KB or incomingAction == ACT_FORWARD_GROUND_KB) and m.vel.y < 0  then
+	
+	if (incomingAction == ACT_HARD_BACKWARD_GROUND_KB or incomingAction == ACT_HARD_FORWARD_GROUND_KB or incomingAction == ACT_BACKWARD_GROUND_KB or incomingAction == ACT_FORWARD_GROUND_KB) and m.vel.y < 0  then
 		if  m.hurtCounter > 0 and m.invincTimer <= 0 then
 			spawn_coin(m)
 		end
@@ -289,17 +392,105 @@ function before_set_mario_action(m,incomingAction)
 
 end
 
-function friendlyringloss_command(msg)
+
+---@param m MarioState
+--this function is called every time a player's current action is changed
+local function on_set_mario(m)
+
+	if m.playerIndex ~= 0 then
+        return
+    end
+
+	if (m.action == ACT_SQUISHED)  then 
+		if (gGlobalSyncTable.ringscrushinstadeath == true) then
+			m.health = 0xff
+			m.invincTimer = 60
+		else
+			spawn_coin(m)
+			return
+		end
+	end
+
+end
+
+---@param m MarioState
+---@param o Object
+---@param interactType InteractionType
+--this function is for allowing kirby to interact with objects.
+local function allow_interact(m,o,interactType)
+	local superimmunetable = {[INTERACT_DAMAGE] = true,[INTERACT_SHOCK] = true, [INTERACT_FLAME] = true , [INTERACT_SNUFIT_BULLET] = true ,[INTERACT_UNKNOWN_08] = true, [INTERACT_MR_BLIZZARD] = true, [INTERACT_CLAM_OR_BUBBA] = true}
+	if m.playerIndex ~= 0 then
+        return
+    end
+	local x = get_id_from_behavior(o.behavior)
+	if  gPlayerSyncTable[0].issuper == true  then
+		if superenemyfunctions[x] ~= nil then
+			local customfunc = superenemyfunctions[x]
+			if customfunc ~= nil then
+                return customfunc(o)--whether the object can interact with super form return true to allow false otherwise
+            end
+		elseif superimmunetable[interactType] then
+			o.oInteractStatus = ATTACK_KICK_OR_TRIP | INT_STATUS_INTERACTED | INT_STATUS_WAS_ATTACKED
+			return false
+		elseif (interactType == INTERACT_BOUNCE_TOP) or(interactType == INTERACT_BOUNCE_TOP2) or(interactType == INTERACT_HIT_FROM_BELOW) or (interactType == INTERACT_KOOPA and o.oKoopaMovementType < KOOPA_BP_KOOPA_THE_QUICK_BASE) then
+			if (m.pos.y > o.oPosY) and (m.action & ACT_FLAG_AIR ~= 0) then
+				return true
+			else
+				o.oInteractStatus =  ATTACK_GROUND_POUND_OR_TWIRL | INT_STATUS_INTERACTED | INT_STATUS_WAS_ATTACKED
+				
+				return false
+			end
+		elseif interactType == INTERACT_BULLY then
+			o.oInteractStatus = ATTACK_KICK_OR_TRIP | INT_STATUS_INTERACTED | INT_STATUS_WAS_ATTACKED
+			o.oAction = BULLY_ACT_KNOCKBACK
+			o.oFlags = o.oFlags & ~0x8
+			o.oMoveAngleYaw = m.faceAngle.y
+			o.oForwardVel = 3392 / o.hitboxRadius
+			o.oBullyMarioCollisionAngle = o.oMoveAngleYaw
+			o.oBullyLastNetworkPlayerIndex = gNetworkPlayers[0].globalIndex
+			m.interactObj = o
+			return false
+		elseif x == id_bhvChuckya then
+			o.oAction = 2
+            o.oMoveFlags = o.oMoveFlags & OBJ_MOVE_LANDED
+			return false
+		elseif x == id_bhvKingBobomb then
+			if (o.oAction ~= 0 and o.oAction ~= 4 and o.oAction ~= 5 and o.oAction ~= 6 and o.oAction ~= 7 and o.oAction ~= 8) then
+				o.oPosY = o.oPosY + 20
+                o.oVelY = 50
+                o.oForwardVel = 20
+                o.oAction = 4
+			end
+			return false
+		elseif x == id_bhvBowser then
+			if (o.oAction ~= 0 and o.oAction ~= 4 and o.oAction ~= 5 and o.oAction ~= 6 and o.oAction ~= 12 and o.oAction ~= 20 ) then
+				o.oHealth = o.oHealth - 1
+                    if o.oHealth  <= 0 then
+                        o.oMoveAngleYaw = o.oBowserAngleToCentre + 0x8000
+                        o.oAction = 4
+                    else
+                        o.oAction = 12
+                    end
+			end
+			return false
+		end
+		
+	end
+end
+
+--- @param msg string
+--this function toggles ring loss by pvp
+local function friendlyringloss_command(msg)
     if not network_is_server() then
         djui_chat_message_create('Only the host can change this setting!')
         return true
     end
-
-    if msg == 'on' then
+	local m = string.lower(msg)
+    if m == 'on' then
         djui_chat_message_create('Friendly ring loss is \\#00C7FF\\on\\#ffffff\\!')
 		gGlobalSyncTable.friendlyringloss = true 
         return true
-	elseif msg == 'off' then
+	elseif m == 'off' then
 		djui_chat_message_create('Friendly ring loss is \\#A02200\\off\\#ffffff\\!')
 		gGlobalSyncTable.friendlyringloss = false 
 		return true
@@ -307,12 +498,14 @@ function friendlyringloss_command(msg)
     return false
 end
 
-function maxringloss_command(msg)
+--- @param msg string
+--this function sets the max amount of rings that can be lost per hit
+local function maxringloss_command(msg)
     if not network_is_server() then
         djui_chat_message_create('Only the host can change this setting!')
         return true
     end
-
+	
     if tonumber(msg) and (tonumber(msg) >= 0) then
 		gGlobalSyncTable.maxringloss = tonumber(msg)
         djui_chat_message_create(string.format("Max ring loss is now %d", gGlobalSyncTable.maxringloss))
@@ -324,17 +517,19 @@ function maxringloss_command(msg)
     return false
 end
 
-function loseringsonlevelchange_command(msg)
+--- @param msg string
+--this function toggles whether to lose rings on level change
+local function loseringsonlevelchange_command(msg)
     if not network_is_server() then
         djui_chat_message_create('Only the host can change this setting!')
         return true
     end
-
-    if msg == 'on' then
+	local m = string.lower(msg)
+    if m == 'on' then
         djui_chat_message_create('Lose rings on level change is \\#00C7FF\\on\\#ffffff\\!')
 		gGlobalSyncTable.loseringsonlevelchange = true 
         return true
-	elseif msg == 'off' then
+	elseif m == 'off' then
 		djui_chat_message_create('Lose ringson level change is \\#A02200\\off\\#ffffff\\!')
 		gGlobalSyncTable.loseringsonlevelchange = false 
 		return true
@@ -342,17 +537,19 @@ function loseringsonlevelchange_command(msg)
     return false
 end
 
-function ringscrushinstadeath_command(msg)
+--- @param msg string
+--this function toggles being crushed being an instadeath
+local function ringscrushinstadeath_command(msg)
     if not network_is_server() then
         djui_chat_message_create('Only the host can change this setting!')
         return true
     end
-
-    if msg == 'on' then
+	local m = string.lower(msg)
+    if m == 'on' then
         djui_chat_message_create('Crushed instadeath is \\#00C7FF\\on\\#ffffff\\!')
 		gGlobalSyncTable.ringscrushinstadeath = true 
         return true
-	elseif msg == 'off' then
+	elseif m == 'off' then
 		djui_chat_message_create('Crushed instadeath is \\#A02200\\off\\#ffffff\\!')
 		gGlobalSyncTable.ringscrushinstadeath = false 
 		return true
@@ -360,17 +557,19 @@ function ringscrushinstadeath_command(msg)
     return false
 end
 
-function decreasecoincounter_command(msg)
+--- @param msg string
+--this function toggles whether to decrease the coin counter on hit
+local function decreasecoincounter_command(msg)
     if not network_is_server() then
         djui_chat_message_create('Only the host can change this setting!')
         return true
     end
-
-    if msg == 'on' then
+	local m = string.lower(msg)
+    if m == 'on' then
         djui_chat_message_create('\\#00C7FF\\The coin counter will now decrease if you take a hit\\#ffffff\\!')
 		gGlobalSyncTable.decreasecoincounter = true 
         return true
-	elseif msg == 'off' then
+	elseif m == 'off' then
 		djui_chat_message_create('\\#A02200\\The coin counter will no longer decrease if you take a hit\\#ffffff\\!')
 		gGlobalSyncTable.decreasecoincounter = false 
 		return true
@@ -378,17 +577,19 @@ function decreasecoincounter_command(msg)
     return false
 end
 
-function recoveryheartshield_command(msg)
+--- @param msg string
+--this function toggles recovery heart shield
+local function recoveryheartshield_command(msg)
     if not network_is_server() then
         djui_chat_message_create('Only the host can change this setting!')
         return true
     end
-
-    if msg == 'on' then
+	local m = string.lower(msg)
+    if m == 'on' then
         djui_chat_message_create('\\#00C7FF\\Recovery hearts will now give shields\\#ffffff\\!')
 		gGlobalSyncTable.recoveryheartshield = true 
         return true
-	elseif msg == 'off' then
+	elseif m == 'off' then
 		djui_chat_message_create('\\#A02200\\Recovery hearts will no longer give shields\\#ffffff\\!')
 		gGlobalSyncTable.recoveryheartshield = false 
 		return true
@@ -396,17 +597,19 @@ function recoveryheartshield_command(msg)
     return false
 end
 
-function sonicfalldamage_command(msg)
+--- @param msg string
+--this function toggles fall damage
+local function sonicfalldamage_command(msg)
     if not network_is_server() then
         djui_chat_message_create('Only the host can change this setting!')
         return true
     end
-
-    if msg == 'on' then
+	local m = string.lower(msg)
+    if m == 'on' then
         djui_chat_message_create('\\#00C7FF\\you can now take fall damage\\#ffffff\\!')
 		gGlobalSyncTable.sonicfalldamage = true 
         return true
-	elseif msg == 'off' then
+	elseif m == 'off' then
 		djui_chat_message_create('\\#A02200\\you now cannot take fall damage\\#ffffff\\!')
 		gGlobalSyncTable.sonicfalldamage = false 
 		return true
@@ -414,12 +617,14 @@ function sonicfalldamage_command(msg)
     return false
 end
 
-function maxrecollectablerings_command(msg)
+--- @param msg string
+--this function sets the max amount of rings that could be recovered on hit
+local function maxrecollectablerings_command(msg)
     if not network_is_server() then
         djui_chat_message_create('Only the host can change this setting!')
         return true
     end
-
+	
     if tonumber(msg) and (tonumber(msg) >= 0) then
 		gGlobalSyncTable.maxrecollectablerings = tonumber(msg)
         djui_chat_message_create(string.format("Max recollectable rings per hit is now %d", gGlobalSyncTable.maxrecollectablerings))
@@ -431,9 +636,10 @@ function maxrecollectablerings_command(msg)
     return false
 end
 
-function ringui_x_command(msg)
+--- @param msg string
+--this is the function sets the ring counts y position
+local function ringui_x_command(msg)
     
-
     if tonumber(msg) and (tonumber(msg) >= 0) then
 		mod_storage_save("ringcount_ui_x", msg)
 		ringui_x = tonumber(mod_storage_load("ringcount_ui_x"))
@@ -446,9 +652,11 @@ function ringui_x_command(msg)
     return false
 end
 
-function ringui_y_command(msg)
+--- @param msg string
+--this is the function sets the ring counts y position
+local function ringui_y_command(msg)
     
-
+	
     if tonumber(msg) and (tonumber(msg) <= 0) then
 		mod_storage_save("ringcount_ui_y", msg)
 		ringui_y = tonumber(mod_storage_load("ringcount_ui_y"))
@@ -456,6 +664,98 @@ function ringui_y_command(msg)
         return true
 	else 
 		djui_chat_message_create('Invalid input. Must be a number like ringui_y -5 and the number needs to be 0 or greater.')
+		return true
+    end
+    return false
+end
+
+--- @param msg string
+--this is the function toggles super forms
+local function sonicsuper_command(msg)
+	local m = string.lower(msg)
+	if m == 'prereq' then
+		djui_chat_message_create('you need 50 rings')
+		if superformfunction == nil then
+			djui_chat_message_create(string.format("and %d stars",gGlobalSyncTable.superstarreq))
+		elseif superformfunction() ~= nil then
+			superformfunction(m)
+		end
+		return true
+	end
+
+    if not network_is_server() then
+        djui_chat_message_create('Only the host can change this setting!')
+        return true
+    end
+
+    if m == 'on' then
+        djui_chat_message_create('\\#00C7FF\\you can now go super\\#ffffff\\!')
+		gGlobalSyncTable.sonicsuperallow = true --toggles super forms 
+        return true
+	elseif m == 'off' then
+		djui_chat_message_create('\\#A02200\\you now cannot go super\\#ffffff\\!')
+		gGlobalSyncTable.sonicsuperallow = false --toggles super forms
+		return true
+	elseif tonumber(m) and tonumber(m) >= 0 then
+		gGlobalSyncTable.superstarreq = tonumber(m)
+		djui_chat_message_create(string.format("super star requirement is now %d (ignored if an external mod changed it)",gGlobalSyncTable.superstarreq))
+		return true
+    end
+    return false
+end
+
+--- @param msg string
+--this is the function for save server settings or loading them
+local function sonichealthconfig_command(msg)
+	local m = string.lower(msg)
+    if m == 'save' then
+        mod_storage_save("friendlyringloss", tostring(gGlobalSyncTable.friendlyringloss))
+        mod_storage_save("loseringsonlevelchange", tostring(gGlobalSyncTable.loseringsonlevelchange))
+        mod_storage_save("ringscrushinstadeath", tostring(gGlobalSyncTable.ringscrushinstadeath))
+        mod_storage_save("decreasecoincounter", tostring(gGlobalSyncTable.decreasecoincounter))
+        mod_storage_save("recoveryheartshield", tostring(gGlobalSyncTable.recoveryheartshield))
+        mod_storage_save("sonicfalldamage", tostring(gGlobalSyncTable.sonicfalldamage))
+        mod_storage_save("sonicsuperallow", tostring(gGlobalSyncTable.sonicsuperallow))
+		mod_storage_save("maxringloss", tostring(gGlobalSyncTable.maxringloss))
+        mod_storage_save("maxrecollectablerings", tostring(gGlobalSyncTable.maxrecollectablerings))
+		
+        djui_chat_message_create('current sonichealth server config saved')
+        return true
+	elseif m == 'load' then
+		if not network_is_server() and not network_is_moderator then
+            djui_chat_message_create('Only the host or a mod can change this setting!')
+            return true
+        else
+            gGlobalSyncTable.friendlyringloss = toboolean( mod_storage_load("friendlyringloss"))
+			gGlobalSyncTable.loseringsonlevelchange = toboolean( mod_storage_load("loseringsonlevelchange"))
+            gGlobalSyncTable.ringscrushinstadeath = toboolean( mod_storage_load("ringscrushinstadeath"))
+            gGlobalSyncTable.decreasecoincounter = toboolean( mod_storage_load("decreasecoincounter"))
+            gGlobalSyncTable.recoveryheartshield = toboolean( mod_storage_load("recoveryheartshield"))
+            gGlobalSyncTable.sonicfalldamage = toboolean( mod_storage_load("sonicfalldamage"))
+            gGlobalSyncTable.sonicsuperallow = toboolean( mod_storage_load("sonicsuperallow"))
+			gGlobalSyncTable.maxringloss = tonumber(mod_storage_load("maxringloss"))
+            gGlobalSyncTable.maxrecollectablerings = tonumber(mod_storage_load("maxrecollectablerings"))
+            djui_chat_message_create('sonichealth server config loaded')
+            return true
+        end
+	elseif m == 'printserver' then
+		djui_chat_message_create(string.format("friendlyringloss is %s",bool_to_str[gGlobalSyncTable.friendlyringloss]))
+		if gGlobalSyncTable.maxringloss == 0 then
+			djui_chat_message_create("all rings will be lost on hit")
+		else
+			djui_chat_message_create(string.format("max ring loss is %d",gGlobalSyncTable.maxringloss))
+		end
+		djui_chat_message_create(string.format("lose rings on level change is %s",bool_to_str[gGlobalSyncTable.loseringsonlevelchange]))
+		djui_chat_message_create(string.format("crushing instadeath is %s",bool_to_str[gGlobalSyncTable.ringscrushinstadeath]))
+		djui_chat_message_create(string.format("fall damage is %s",bool_to_str[gGlobalSyncTable.sonicfalldamage]))
+		djui_chat_message_create(string.format("max recollectable rings is %d",gGlobalSyncTable.maxrecollectablerings))
+		djui_chat_message_create(string.format("decrease coin counter on hit is %s",bool_to_str[gGlobalSyncTable.decreasecoincounter]))
+		djui_chat_message_create(string.format("recovery heart shield is %s",bool_to_str[gGlobalSyncTable.recoveryheartshield]))
+		djui_chat_message_create(string.format("super forms are %s",bool_to_str[gGlobalSyncTable.sonicsuperallow]))
+		return true
+	elseif m == 'printlocal'then
+		djui_chat_message_create(string.format("ring ui x pos is %d",ringui_x))
+		djui_chat_message_create(string.format("ring ui y pos is %d",ringui_y))
 		return true
     end
     return false
@@ -470,19 +770,137 @@ hook_event(HOOK_ON_DEATH, mario_death) -- hook for mario dying
 hook_event(HOOK_ON_PLAYER_CONNECTED, on_player_connected) -- hook for player joining
 hook_event(HOOK_BEFORE_SET_MARIO_ACTION, before_set_mario_action) --hook which is called before every time a player's current action is changed.Return an action to change the incoming action or 1 to cancel the action change.
 hook_event(HOOK_BEFORE_PHYS_STEP, before_phys_step)
+hook_event(HOOK_UPDATE,health_hook_update) -- hook that is called once per frame	
+hook_event(HOOK_ON_SET_MARIO_ACTION,on_set_mario) -- hook that is called every time a player's current action is changed
+hook_event(HOOK_ALLOW_INTERACT, allow_interact) --Called before mario interacts with an object, return true to allow the interaction
+
 
 
 id_bhvCoinring = hook_behavior(nil, OBJ_LIST_LEVEL, true, bhv_coinring_init, bhv_coinring_loop)
 hook_behavior(id_bhvRecoveryHeart, OBJ_LIST_LEVEL, false, nil, bhv_sonicshield_heart_loop)
 
-hook_chat_command('friendlyringloss', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn friendlyringloss \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to lose rings due to other players hitting you", friendlyringloss_command)
-hook_chat_command('maxringloss', "maxringloss [number] this sets the max number of rings you can lose at once set it to 0 to always lose all rings", maxringloss_command)
+hook_chat_command('friendlyringloss', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn friendlyringloss \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to lose rings due to other players hitting you.", friendlyringloss_command)
+hook_chat_command('maxringloss', "maxringloss [number] this sets the max number of rings you can lose at once set it to 0 to always lose all rings.", maxringloss_command)
 
-hook_chat_command('loseringsonlevelchange', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn loseringsonlevelchange \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to keep your rings between levels", loseringsonlevelchange_command)
-hook_chat_command('ringscrushinstadeath', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn ringscrushinstadeath \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want being crushed to be instadeath", ringscrushinstadeath_command)
+hook_chat_command('loseringsonlevelchange', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn loseringsonlevelchange \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to keep your rings between levels.", loseringsonlevelchange_command)
+hook_chat_command('ringscrushinstadeath', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn ringscrushinstadeath \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want being crushed to be instadeath.", ringscrushinstadeath_command)
 hook_chat_command('decreasecoincounter', "[on|off] turn decreasecoincounter on or off to choose if whether to decrease the coin counter on hit and rings equal 1 coin or have the coin counter not decease on hit and rings only affect ring counter", decreasecoincounter_command)
-hook_chat_command('recoveryheartshield', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn recoveryheartshield \\#00C7FF\\on \\#ffffff\\or \\#A02200\\ off \\#ffffff\\ to choose whether recovery hearts should give an overshield on touch ", recoveryheartshield_command)
-hook_chat_command('sonicfalldamage', "[on|off] turn sonicfalldamage on or off to choose whether you can take fall damage ", sonicfalldamage_command)
-hook_chat_command('maxrecollectablerings', "maxrecollectablerings [number] this sets the maximum amount of rings you can get back per hit ", maxrecollectablerings_command)
+hook_chat_command('recoveryheartshield', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn recoveryheartshield \\#00C7FF\\on \\#ffffff\\or \\#A02200\\ off \\#ffffff\\ to choose whether recovery hearts should give an overshield on touch.", recoveryheartshield_command)
+hook_chat_command('sonicfalldamage', "[on|off] turn sonicfalldamage on or off to choose whether you can take fall damage", sonicfalldamage_command)
+hook_chat_command('maxrecollectablerings', "maxrecollectablerings [number] this sets the maximum amount of rings you can get back per hit", maxrecollectablerings_command)
 hook_chat_command('ringui_x', "ringui_x [number] this sets the x position of the ring counter should be a value  between 0 and 320", ringui_x_command)
 hook_chat_command('ringui_y', "ringui_y [number] this sets the y position of the ring counter should be a value between 0 and  -240", ringui_y_command)
+hook_chat_command('sonicsuper', "[on|off|prereq] toggle the ability to go super with 50+ rings + requirement, get the requirement by typing prereq ,or change prereq by entering number of stars needed.", sonicsuper_command)
+hook_chat_command('sonichealthconfig', "[\\#00C7FF\\save\\#ffffff\\|\\#A02200\\load\\#ffffff\\|printserver|printlocal] to save the current sonic health settings to a file or load them (loading only works if used by a moderator or the server)", sonichealthconfig_command)
+
+--sonic health mod api functions
+_G.sonichealth = {
+
+	customsupercheck = function(...)--function to allow other mod to pass its own super prereq check
+		local arg  = table.pack(...)
+		if (type(arg[1]) == "function") then
+			superformfunction = arg[1]
+		end
+	end,
+	supermoveset = function(...)--function to store super toggles for other mods with the functions having false for off and true for on
+		local arg  = table.pack(...)
+		if (arg[1] ~= nil) and (type(arg[1]) == "function") then
+			supermovesetfunctions[superformfunctiontablelength] = (arg[1])
+			superformfunctiontablelength = superformfunctiontablelength + 1
+		end
+	end,
+	--this function allows other mods to check ringcount
+	getringcount = function()
+		return ringcount
+	end,
+	--- @param n number
+	--this function allows other mods to modify ringcount
+	increaseringcount = function(n)
+		ringcount = n + ringcount
+		if ringcount < 0 then
+			ringcount = 0
+		end
+	end,
+		--this function allows other mods to interact with super forms
+	addsuperenemyfunction = function(...)
+		local arg  = table.pack(...)
+		local customfunction
+		local bhvid
+		if arg.n < 2 then
+            return
+		end
+		if (type(arg[1]) == "function") then
+			customfunction = arg[1]
+		else 
+			return
+		end
+		bhvid = arg[2]
+		superenemyfunctions[bhvid] = customfunction
+	end,
+	getversion = function()--this function returns the sonic health version
+		return version
+	end
+}
+
+--below are some examples of using the mod api in another mod
+--[[ 
+local servermodsync = false
+local super = false
+
+---@param bool boolean
+--this function is an example for a super form toggle for sonic health mod 
+function kirbysuper(bool)
+    local str
+    if bool == false then
+        str = 'kirby stopped being super'
+    else
+        str = 'kirby went super'
+    end
+    if gPlayerSyncTable[0].kirby == true then
+        djui_chat_message_create(str)
+    end
+	super = bool
+end
+
+--this function is an example of setting a prereq for super form through an external mod
+function kirbypreq(...)
+    local arg  = table.pack(...)
+    if arg.n == 0 then
+        if gMarioStates[0].numStars == 120 then
+            return true
+        else
+            djui_chat_message_create("you need 120 stars")
+            return false
+        end
+    elseif arg.n == 1 and (type(arg[1]) == "string") then
+        djui_chat_message_create("you need 120 stars")
+    end
+end
+
+--- @param m MarioState
+--Called when a player connects
+local function on_player_connected(m)
+    -- only run on server
+    if not network_is_server() then
+        return
+	end
+    if servermodsync == false then
+        if _G.sonichealth ~= nil then
+            _G.sonichealth.supermoveset(kirbysuper)
+            _G.sonichealth.customsupercheck(kirbypreq)
+        end 
+        servermodsync = true
+    end
+end
+
+--Called when the local player finishes the join process (if the player isn't the host)
+local function on_join()
+    if _G.sonichealth ~= nil then
+        _G.sonichealth.supermoveset(kirbysuper)
+    end 
+end
+
+hook_event(HOOK_JOINED_GAME, on_join) -- Called when the local player finishes the join process (if the player isn't the host)
+hook_event(HOOK_ON_PLAYER_CONNECTED, on_player_connected) -- hook for player joining
+
+ ]]
