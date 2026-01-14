@@ -186,7 +186,7 @@ function mario_update(m)
 	elseif (m.floor.type == SURFACE_BURNING and (m.pos.y == m.floorHeight) and (m.action ~= ACT_SLIDE_KICK))  then --checking if mario is standing on lava
 		spawn_coin(m)
 		return
-	elseif (m.wall.type == SURFACE_BURNING )  then --checking if mario is touching a lava wall
+	elseif  m.wall ~= nil and m.wall.type == SURFACE_BURNING  then --checking if mario is touching a lava wall
 		spawn_coin(m)
 		return
     end
