@@ -4,13 +4,22 @@
 local ringcount = 0
 gGlobalSyncTable.friendlyringloss = false --whether other players can cause you to lose rings
 gGlobalSyncTable.maxringloss = 0 --maximum amount of rings you are allowed to lose at once if its equal to 0 you lose all rings at once
+gGlobalSyncTable.maxrecollectablerings = 999 --maximum amount of rings you can get back per hit
 gGlobalSyncTable.loseringsonlevelchange = true --whether to lose rings on level change
 gPlayerSyncTable[0].losingrings = 0 --rings to deduct from the coin counter for a player
 gGlobalSyncTable.ringscrushinstadeath = true --whether to instantly die when crushed
 gGlobalSyncTable.decreasecoincounter = true --whether to decrease the coin counter on hit and have coins spawned on hit equal 1 coin or have the coin counter not decease on hit and have coins spawned only count for the ring counter
 gPlayerSyncTable[0].shieldhits = 0  --current number of hits remaining for current shield
 gGlobalSyncTable.recoveryheartshield = true --whether recovery hearts should give an overshield on touch
+gGlobalSyncTable.sonicfalldamage = false --toggles fall damage
 
+if mod_storage_load("ringcount_ui_x") == nil or mod_storage_load("ringcount_ui_y") == nil then
+	mod_storage_save("ringcount_ui_x", "0")
+	mod_storage_save("ringcount_ui_y", "0")
+end
+
+	local ringui_x = tonumber(mod_storage_load("ringcount_ui_x"))
+	local ringui_y = tonumber(mod_storage_load("ringcount_ui_y"))
 
 --- @param o Object
 function bhv_coinring_init(o)
@@ -20,14 +29,17 @@ function bhv_coinring_init(o)
     o.oFlags = OBJ_FLAG_UPDATE_GFX_POS_AND_ANGLE
     o.oInteractType = INTERACT_COIN
 	o.hitboxDownOffset = 0
-	o.oDamageOrCoinValue = 0
 	o.oHealth = 0
 	o.oNumLootCoins = 0
     o.hitboxRadius = 100
     o.hitboxHeight = 64
     o.hurtboxRadius= 0
 	o.hurtboxHeight = 0
-	
+	if gGlobalSyncTable.decreasecoincounter == true then
+		o.oDamageOrCoinValue = 1
+	else
+		o.oDamageOrCoinValue = 0
+	end
 	
 	cur_obj_update_floor_and_walls()
 	
@@ -36,6 +48,11 @@ end
 function bhv_coinring_loop(obj)
 	bhv_yellow_coin_loop()
 	bhv_moving_yellow_coin_loop()
+	cur_obj_update_floor_and_walls()
+	if obj.oFloorHeight ==  obj.oPosY then
+		obj.oVelY = 40
+	end
+	
 end
 
 
@@ -56,41 +73,18 @@ function ringInitialize()
 	end
 end
 
----@param m MarioState 
----@param o Object
---determines if mario loses a coin on hit or dies by an object
-function sonicHurt(m,o,interactType)
-	if (m.playerIndex ~= 0) then
-		return
-	elseif (interactType == INTERACT_WATER_RING or interactType == INTERACT_KOOPA_SHELL) or ((m.flags & ACT_FLAG_RIDING_SHELL) ~= 0) or ((m.flags & ACT_RIDING_SHELL_GROUND) ~= 0) or ((m.flags & ACT_RIDING_SHELL_FALL) == 0) or ((m.flags & ACT_RIDING_SHELL_JUMP) == 0) or get_id_from_behavior(o.behavior) == id_bhvKingBobomb or get_id_from_behavior(o.behavior) == id_bhvChuckya or ( o.oInteractStatus == INT_STATUS_WAS_ATTACKED) then
-		return
-    elseif (m.invincTimer == 0) and ((m.flags & MARIO_METAL_CAP) == 0) then
-		if ( get_id_from_behavior(o.behavior) == id_bhvSpiny or (interactType == INTERACT_DAMAGE ) )  then
-			if  (o.oDamageOrCoinValue > 0) then
-					if (get_id_from_behavior(o.behavior) == id_bhvSpiny) then  ---fixed spiny crash by making dropped rings non sync objects instead of synced objects for now. spiny crash happened when 2 or more rings spawned when spiny existed
-						spawn_coin(m)
-					else
-						spawn_coin(m)
-					end
-					return				
-			end
-		elseif (interactType == INTERACT_FLAME) or (interactType == INTERACT_SNUFIT_BULLET)  or (o.oDamageOrCoinValue > 0) then
-			if  (take_damage_and_knock_back(m, o) ~= 0 or interactType == INTERACT_SNUFIT_BULLET ) then
-					spawn_coin(m)
-					return
-			end
-		end
-	end
 
-end
 
 ---@param attacker MarioState --attacking player's MarioState 
 ---@param victim MarioState -- attacked player's MarioState
 --determines if an attacked player loses a coin on hit or dies by another player
 function sonicPvpHurt(attacker, victim)	
-	if (gGlobalSyncTable.friendlyringloss == false)  or ((victim.flags & MARIO_METAL_CAP) ~= 0) then
-		return
-    elseif victim.playerIndex == 0 then
+	if victim.playerIndex ~= 0 then
+        return
+	elseif (gGlobalSyncTable.friendlyringloss == false)  or ((victim.flags & MARIO_METAL_CAP) ~= 0) then
+		victim.hurtCounter = 0
+	else
+		victim.invincTimer = 0
 		spawn_coin(victim)
 	end
 
@@ -101,8 +95,14 @@ end
 function spawn_coin(m)
 	local radius = 256
 	m.hurtCounter = 0
-	m.invincTimer = 60
-
+	if m.invincTimer <= 0 then
+		m.invincTimer = 60
+	elseif ((m.flags & MARIO_METAL_CAP) ~= 0) or m.invincTimer > 0 then
+		if (m.action == ACT_BURNING_GROUND or m.action == ACT_BURNING_JUMP or m.action == ACT_BURNING_FALL) and (m.input & INPUT_IN_POISON_GAS == 0)  then
+			m.health = 0x880
+		end
+		return
+	end
 	if  gPlayerSyncTable[0].shieldhits > 0 then
 		gPlayerSyncTable[0].shieldhits = gPlayerSyncTable[0].shieldhits - 1
 		djui_chat_message_create('Your shield took the hit.')
@@ -111,61 +111,41 @@ function spawn_coin(m)
 		m.health = 0xff
 		return
 	end
-
-	if (gGlobalSyncTable.maxringloss == 0 or ringcount < gGlobalSyncTable.maxringloss) and (gGlobalSyncTable.decreasecoincounter == true) then
-		for i = 0,ringcount -1,1 do
-			spawn_non_sync_object(
-			id_bhvMovingYellowCoin,
-			E_MODEL_YELLOW_COIN,
-			m.pos.x, m.pos.y, m.pos.z,
-			function (coin)
-				return ring_randomization(coin)
-			end)
-		end
-		for i = 0,MAX_PLAYERS - 1,1 do
-			if gNetworkPlayers[i].currLevelNum == gNetworkPlayers[0].currLevelNum and gNetworkPlayers[i].currActNum == gNetworkPlayers[0].currActNum then
-				gPlayerSyncTable[i].losingrings = gPlayerSyncTable[i].losingrings + ringcount
+	
+	if (m.action == ACT_BURNING_GROUND or m.action == ACT_BURNING_JUMP or m.action == ACT_BURNING_FALL) and (m.input & INPUT_IN_POISON_GAS == 0) then
+		m.health = 0x880
+	end
+	
+	if (gGlobalSyncTable.maxringloss == 0 or ringcount < gGlobalSyncTable.maxringloss) then
+			for i = 0,ringcount -1,1 do
+				if i >= gGlobalSyncTable.maxrecollectablerings then
+					break
+				end
+				spawn_sync_object(id_bhvCoinring,E_MODEL_YELLOW_COIN,m.pos.x , m.pos.y + 161, m.pos.z,ring_randomization)
 			end
-		end
-		ringcount = 0
-	elseif (gGlobalSyncTable.decreasecoincounter == true) then
+			if gGlobalSyncTable.decreasecoincounter == true then
+				for i = 0,MAX_PLAYERS - 1,1 do
+					if gNetworkPlayers[i].currLevelNum == gNetworkPlayers[0].currLevelNum and gNetworkPlayers[i].currActNum == gNetworkPlayers[0].currActNum then
+						gPlayerSyncTable[i].losingrings = gPlayerSyncTable[i].losingrings + ringcount
+					end
+				end
+			end
+			ringcount = 0
+	else
 		for i = 0,gGlobalSyncTable.maxringloss -1,1 do
-			spawn_non_sync_object(
-			id_bhvMovingYellowCoin,
-			E_MODEL_YELLOW_COIN,
-			m.pos.x, m.pos.y, m.pos.z,
-			function (coin)
-				return ring_randomization(coin)
-			end)
+			if i >= gGlobalSyncTable.maxrecollectablerings then
+				break
+			end
+			spawn_sync_object(id_bhvCoinring,E_MODEL_YELLOW_COIN,m.pos.x, m.pos.y + 161, m.pos.z,ring_randomization)
 		end
-		for i = 0,MAX_PLAYERS - 1,1 do
-			if gNetworkPlayers[i].currLevelNum == gNetworkPlayers[0].currLevelNum and gNetworkPlayers[i].currActNum == gNetworkPlayers[0].currActNum then
-				gPlayerSyncTable[i].losingrings = gPlayerSyncTable[i].losingrings + gGlobalSyncTable.maxringloss
+		if gGlobalSyncTable.decreasecoincounter == true then
+			for i = 0,MAX_PLAYERS - 1,1 do
+				if gNetworkPlayers[i].currLevelNum == gNetworkPlayers[0].currLevelNum and gNetworkPlayers[i].currActNum == gNetworkPlayers[0].currActNum then
+					gPlayerSyncTable[i].losingrings = gPlayerSyncTable[i].losingrings + gGlobalSyncTable.maxringloss
+				end
 			end
 		end
 		ringcount = ringcount - gGlobalSyncTable.maxringloss
-	elseif (gGlobalSyncTable.maxringloss == 0 or ringcount < gGlobalSyncTable.maxringloss) and (gGlobalSyncTable.decreasecoincounter == false) then
-			for i = 0,ringcount -1,1 do
-				spawn_non_sync_object(
-				id_bhvCoinring,
-				E_MODEL_YELLOW_COIN,
-				m.pos.x, m.pos.y, m.pos.z,
-				function (coin)
-				    return ring_randomization(coin)
-				end)
-			end
-			ringcount = 0
-		elseif (gGlobalSyncTable.decreasecoincounter == false) then
-			for i = 0,gGlobalSyncTable.maxringloss -1,1 do
-				spawn_non_sync_object(
-				id_bhvCoinring,
-				E_MODEL_YELLOW_COIN,
-				m.pos.x, m.pos.y, m.pos.z,
-				function (coin)
-				    return ring_randomization(coin)
-				end)
-			end
-			ringcount = ringcount - gGlobalSyncTable.maxringloss
 	end
 end
 
@@ -192,37 +172,26 @@ function sonicCoinGet(m, o,interactType)
 		elseif interactType == INTERACT_COIN and o.oDamageOrCoinValue == 5  then--checking that a blue coin was interacted with
 			ringcount = ringcount + 5
 			m.healCounter = 0
-		else 
-			sonicHurt(m,o,interactType)
 		end
     end
 end
 
 --sets up a clientside ring counter
 function ringDisplay()
-
 	
     djui_hud_set_font(FONT_HUD)
     djui_hud_set_resolution(RESOLUTION_N64)
 
-    local screenHeight = djui_hud_get_screen_height()
-    local screenWidth = djui_hud_get_screen_width()
-    local textLength = djui_hud_measure_text(string.format("rings %d", ringcount))
-
-    local y = screenHeight - (screenHeight/1.40)
-    local x = (screenWidth - textLength)/screenWidth
-
     local scale = 1
 
-    x = screenWidth - textLength
 	djui_hud_set_color(255, 255, 255, 255);
-    djui_hud_print_text(string.format("rings %d", ringcount), x - 15, y, scale)
+    djui_hud_print_text(string.format("rings %d", ringcount), ringui_x, -ringui_y, scale)
 
 end
 
 ---@param m MarioState
 --Called once per player per frame before physics code is run
-function mario_update(m)
+function before_phys_step(m)
     if (m.playerIndex ~= 0) then
 		return
 	elseif ((m.flags & MARIO_METAL_CAP) ~= 0) or (m.invincTimer ~= 0)  then
@@ -238,32 +207,20 @@ function mario_update(m)
 
 end
 
+
 ---@param m MarioState
 --Called once per player per frame at the end of a mario update
 function mario_update_end(m)
-	local stepResult
-	local waterstepResult
 	if (m.playerIndex ~= 0) then
 		return
-	elseif (m.action == ACT_SQUISHED )  then --checking if mario is squished
-		if (gGlobalSyncTable.ringscrushinstadeath == true) then
-				m.health = 0xff
-			elseif ((m.flags & MARIO_METAL_CAP) == 0 and m.invincTimer == 0)  then
-				spawn_coin(m)
-				return
-			end
-	elseif (m.action == ACT_THROWN_BACKWARD or m.action == ACT_THROWN_FORWARD)  then --checking if mario was thrown 
-			stepResult = perform_air_step(m, 0)
-			if m.pos.y - m.floorHeight <= 60 then --checking if mario is close to the floor to check for shallow water
-				waterstepResult = perform_water_step(m)
-			end
-			if ((m.flags & MARIO_METAL_CAP) == 0 and m.invincTimer == 0) and (stepResult == AIR_STEP_LANDED or waterstepResult == WATER_STEP_HIT_FLOOR)  then
-				spawn_coin(m)
-				return
-			end
-	else
+	elseif gGlobalSyncTable.sonicfalldamage == false then
 		m.peakHeight = m.pos.y --disabling fall damage
 	end
+
+	if (m.pos.y ~= m.floorHeight) and m.invincTimer > 0 and (m.action == ACT_FORWARD_AIR_KB or m.action == ACT_BACKWARD_AIR_KB or m.action == ACT_THROWN_BACKWARD or m.action == ACT_THROWN_FORWARD) then --making the invincibity timer not decrement until hitting the ground if in hitstun
+		m.invincTimer = m.invincTimer + 1
+	end
+
 	if gPlayerSyncTable[0].losingrings ~= 0 then --deducting coins from current player's coin count if their losingrings field > 0
 		m.numCoins = m.numCoins - gPlayerSyncTable[0].losingrings
 		gPlayerSyncTable[0].losingrings = 0
@@ -297,6 +254,39 @@ function on_player_connected(m)
 		end
 
     end
+end
+
+---@param m MarioState
+---@param incomingAction integer
+--this function is called before every time a player's current action is changed
+function before_set_mario_action(m,incomingAction)
+    if m.playerIndex ~= 0 or gPlayerSyncTable[0].kirby == false then
+        return
+    end
+	if incomingAction == ACT_SQUISHED and m.hurtCounter > 0 then 
+		if (gGlobalSyncTable.ringscrushinstadeath == true) then
+			m.health = 0xff
+			m.invincTimer = 60
+		else
+			spawn_coin(m)
+			return
+		end
+	elseif (incomingAction == ACT_HARD_BACKWARD_GROUND_KB or incomingAction == ACT_HARD_FORWARD_GROUND_KB or incomingAction == ACT_BACKWARD_GROUND_KB or incomingAction == ACT_FORWARD_GROUND_KB) and m.vel.y < 0  then
+		if  m.hurtCounter > 0 and m.invincTimer <= 0 then
+			spawn_coin(m)
+		end
+		return ACT_IDLE
+	elseif incomingAction == ACT_BURNING_GROUND and m.pos.y == m.floorHeight and m.floor.type ~= SURFACE_BURNING then
+		spawn_coin(m)
+		return ACT_IDLE
+	elseif incomingAction == ACT_BURNING_FALL then
+		spawn_coin(m)
+		return ACT_BACKWARD_AIR_KB
+	elseif  m.hurtCounter > 0 or (incomingAction == ACT_BURNING_GROUND and (m.wall == nil or ( m.wall ~= nil and m.wall.type ~= SURFACE_BURNING)) and (m.floor.type ~= SURFACE_BURNING and m.pos.y == m.floorHeight) ) then
+        spawn_coin(m)
+		return
+    end
+
 end
 
 function friendlyringloss_command(msg)
@@ -406,23 +396,93 @@ function recoveryheartshield_command(msg)
     return false
 end
 
+function sonicfalldamage_command(msg)
+    if not network_is_server() then
+        djui_chat_message_create('Only the host can change this setting!')
+        return true
+    end
+
+    if msg == 'on' then
+        djui_chat_message_create('\\#00C7FF\\you can now take fall damage\\#ffffff\\!')
+		gGlobalSyncTable.sonicfalldamage = true 
+        return true
+	elseif msg == 'off' then
+		djui_chat_message_create('\\#A02200\\you now cannot take fall damage\\#ffffff\\!')
+		gGlobalSyncTable.sonicfalldamage = false 
+		return true
+    end
+    return false
+end
+
+function maxrecollectablerings_command(msg)
+    if not network_is_server() then
+        djui_chat_message_create('Only the host can change this setting!')
+        return true
+    end
+
+    if tonumber(msg) and (tonumber(msg) >= 0) then
+		gGlobalSyncTable.maxrecollectablerings = tonumber(msg)
+        djui_chat_message_create(string.format("Max recollectable rings per hit is now %d", gGlobalSyncTable.maxrecollectablerings))
+        return true
+	else 
+		djui_chat_message_create('Invalid input. Must be a number like maxrecollectablerings 5 and the number needs to be 0 or greater.')
+		return true
+    end
+    return false
+end
+
+function ringui_x_command(msg)
+    
+
+    if tonumber(msg) and (tonumber(msg) >= 0) then
+		mod_storage_save("ringcount_ui_x", msg)
+		ringui_x = tonumber(mod_storage_load("ringcount_ui_x"))
+        djui_chat_message_create(string.format("ringcount ui's x coordinate is now %d", ringui_x))
+        return true
+	else 
+		djui_chat_message_create('Invalid input. Must be a number like ringui_x 5 and the number needs to be 0 or greater.')
+		return true
+    end
+    return false
+end
+
+function ringui_y_command(msg)
+    
+
+    if tonumber(msg) and (tonumber(msg) <= 0) then
+		mod_storage_save("ringcount_ui_y", msg)
+		ringui_y = tonumber(mod_storage_load("ringcount_ui_y"))
+        djui_chat_message_create(string.format("ringcount ui's y coordinate is now %d", ringui_y))
+        return true
+	else 
+		djui_chat_message_create('Invalid input. Must be a number like ringui_y -5 and the number needs to be 0 or greater.')
+		return true
+    end
+    return false
+end
+
 hook_event(HOOK_ON_LEVEL_INIT, ringInitialize) --hook for setting coins to 0 on level change
 hook_event(HOOK_ON_INTERACT, sonicCoinGet) --hook for interacting with coins
 hook_event(HOOK_ON_HUD_RENDER, ringDisplay) -- hook for displaying ring count
 hook_event(HOOK_MARIO_UPDATE, mario_update_end)
 hook_event(HOOK_ON_PVP_ATTACK, sonicPvpHurt) --hook for pvp attacks
-hook_event(HOOK_BEFORE_PHYS_STEP, mario_update)
 hook_event(HOOK_ON_DEATH, mario_death) -- hook for mario dying 
 hook_event(HOOK_ON_PLAYER_CONNECTED, on_player_connected) -- hook for player joining
+hook_event(HOOK_BEFORE_SET_MARIO_ACTION, before_set_mario_action) --hook which is called before every time a player's current action is changed.Return an action to change the incoming action or 1 to cancel the action change.
+hook_event(HOOK_BEFORE_PHYS_STEP, before_phys_step)
+
 
 id_bhvCoinring = hook_behavior(nil, OBJ_LIST_LEVEL, true, bhv_coinring_init, bhv_coinring_loop)
 hook_behavior(id_bhvRecoveryHeart, OBJ_LIST_LEVEL, false, nil, bhv_sonicshield_heart_loop)
---hook_on_sync_table_change(gPlayerSyncTable, 'losingrings', 'tag', on_testing_field_changed)
 
 hook_chat_command('friendlyringloss', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn friendlyringloss \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to lose rings due to other players hitting you", friendlyringloss_command)
 hook_chat_command('maxringloss', "maxringloss [number] this sets the max number of rings you can lose at once set it to 0 to always lose all rings", maxringloss_command)
 
 hook_chat_command('loseringsonlevelchange', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn loseringsonlevelchange \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want to keep your rings between levels", loseringsonlevelchange_command)
 hook_chat_command('ringscrushinstadeath', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn ringscrushinstadeath \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if you want being crushed to be instadeath", ringscrushinstadeath_command)
-hook_chat_command('decreasecoincounter', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn decreasecoincounter \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose if whether to decrease the coin counter on hit and have coins spawned on hit equal 1 coin or have the coin counter not decease on hit and have coins spawned only count for the ring counter", decreasecoincounter_command)
-hook_chat_command('recoveryheartshield', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn recoveryheartshield \\#00C7FF\\on \\#ffffff\\or \\#A02200\\off \\#ffffff\\to choose whether recovery hearts should give an overshield on touch ", recoveryheartshield_command)
+hook_chat_command('decreasecoincounter', "[on|off] turn decreasecoincounter on or off to choose if whether to decrease the coin counter on hit and rings equal 1 coin or have the coin counter not decease on hit and rings only affect ring counter", decreasecoincounter_command)
+hook_chat_command('recoveryheartshield', "[\\#00C7FF\\on\\#ffffff\\|\\#A02200\\off\\#ffffff\\] turn recoveryheartshield \\#00C7FF\\on \\#ffffff\\or \\#A02200\\ off \\#ffffff\\ to choose whether recovery hearts should give an overshield on touch ", recoveryheartshield_command)
+hook_chat_command('sonicfalldamage', "[on|off] turn sonicfalldamage on or off to choose whether you can take fall damage ", sonicfalldamage_command)
+hook_chat_command('maxrecollectablerings', "maxrecollectablerings [number] this sets the maximum amount of rings you can get back per hit ", maxrecollectablerings_command)
+hook_chat_command('ringui_x', "ringui_x [number] this sets the x position of the ring counter should be a value  between 0 and 320", ringui_x_command)
+hook_chat_command('ringui_y', "ringui_y [number] this sets the y position of the ring counter should be a value between 0 and  -240", ringui_y_command)
