@@ -28,13 +28,15 @@ local supermovesetfunctions = {}--functions that tell other movesets that you ar
 local superformfunctiontablelength = 0 --the number of functions in supermovesetfunctions
 local bool_to_str = {[false] = "\\#A02200\\off\\#ffffff\\",[true] = "\\#00C7FF\\on\\#ffffff\\"} --table for converting boolean into string
 local bool_to_num = {[false] = 0,[true] = 1} --table for converting boolean into numbers
-local version = "2.3.0" --string containing the sonic health version
+local version = "2.4.0" --string containing the sonic health version
 local settingsuperbutton = false --used for checking if the local player is setting the 1st super button
 local movingui = false --used for checking if the local player is moving the ui with the dpad
 local set2ndsuperbutton = false --used for checking if the local player is setting the 2nd super button
 local allycheck --a function used for checking if a player is on a team set through _G.sonichealth.addallycheck 
 local lastnumcoin --the last m.numCoins value the local player had used for detecting coin changes from objects with interacttype 0
 local lastcoinobj --the last coin obj touched
+local modsupporthelperfunctions = {} --local references to functions from other mods
+
 
 local sonichealthconfig_command --this is the function for save server settings or loading them
 local sonichealthsuperbutton_command --this is the function for changing the super button
@@ -45,6 +47,10 @@ local ringscrushinstadeath_command --this function toggles being crushed being a
 local decreasecoincounter_command --this function toggles whether to decrease the coin counter on hit
 local recoveryheartshield_command --this function toggles recovery heart shield
 local sonicfalldamage_command --this function toggles fall damage
+
+if INTERACT_UNKNOWN_08 == nil then --code for if legacy variable INTERACT_UNKNOWN_08 was removed INTERACT_UNKNOWN_08 = INTERACT_SPINY_WALKING 
+	INTERACT_UNKNOWN_08 = INTERACT_SPINY_WALKING
+end
 
 local buttons = {--doubly linked list of the different buttons
     [A_BUTTON] = {name = "A ",prev = nil ,next = B_BUTTON},
@@ -158,6 +164,15 @@ function bhv_coinring_init(o)
 	cur_obj_update_floor_and_walls()
 end
 
+--- @param o Object
+--this sets an object used for making sure bowser dies when he is set to 0 or less health by sonic health's super form
+function bhv_sonichealthbowserdeathconfirm_init(o)
+    cur_obj_scale(1.0)
+    cur_obj_set_hitbox_radius_and_height(100, 160)
+    cur_obj_set_hurtbox_radius_and_height(0, 0)
+    o.oFlags = OBJ_FLAG_UPDATE_GFX_POS_AND_ANGLE
+end
+
 --- @param obj Object
 --function used for the id_bhvcoinring after init
 function bhv_coinring_loop(obj)
@@ -174,10 +189,32 @@ end
 function bhv_sonicshield_heart_loop(obj)
 	if (gMarioStates[0].playerIndex ~= 0) or gGlobalSyncTable.recoveryheartshield == false  then
 		return
-	elseif (nearest_interacting_mario_state_to_object(obj)).playerIndex == 0 and is_within_100_units_of_mario(obj.oPosX, obj.oPosY, obj.oPosZ) == 1 then
+	elseif (nearest_interacting_mario_state_to_object(obj)).playerIndex == 0 and is_within_100_units_of_mario(obj.oPosX, obj.oPosY, obj.oPosZ) == 1 and ((gPlayerSyncTable[0].shieldhits ~= 1) or (gPlayerSyncTable[0].shieldtype ~= shieldtypetable["default"])) then
+		if (gPlayerSyncTable[0].shieldtype ~= shieldtypetable["default"]) then
+			djui_chat_message_create(string.format('Your %d hit %s shield got replaced with a generic 1-hit shield.',modsupporthelperfunctions.sonichealth.getshield("shieldtypeandhits")))
+		else
+			djui_chat_message_create('You got a 1-hit shield.')
+		end
 		gPlayerSyncTable[0].shieldhits = 1
-		djui_chat_message_create('You got a 1-hit shield.')
+		gPlayerSyncTable[0].shieldtype = 0
+		
 	end
+end
+
+--- @param o Object
+--this is a loop for an object used for making sure bowser dies when he is set to 0 or less health by sonic health's super form
+function bhv_sonichealthbowserdeathconfirm_loop(o)
+    if (o.parentObj == nil) or (o.parentObj.oAction ~= 4) then
+        obj_mark_for_deletion(o)
+    elseif o.parentObj.oAction == 4 and (o.parentObj.oPosY < o.parentObj.oHomeY - 100.0 )then --check for bowser falling off stage while dead
+        o.parentObj.oPosX = o.parentObj.oHomeX
+        o.parentObj.oPosY = o.parentObj.oHomeY
+        o.parentObj.oPosZ = o.parentObj.oHomeZ
+    else
+        o.oPosX = o.parentObj.oPosX
+        o.oPosY = o.parentObj.oPosY
+        o.oPosZ = o.parentObj.oPosZ
+    end
 end
 
 --determines what happens on level start
@@ -439,6 +476,9 @@ local function health_hook_update()
 			ringcount = ringcount - 1
 			if ringcount <= 0 then
 				supertoggle(false)
+				if ringcount < 0 then
+					ringcount = 0
+				end
 			end
 			if gGlobalSyncTable.decreasecoincounter == true then
 				for i = 0,MAX_PLAYERS - 1,1 do
@@ -613,14 +653,14 @@ end
 ---@param interactType InteractionType
 --this function is for allowing mario to interact with objects.
 local function allow_interact(m,o,interactType)
-	local superimmunetable = {[INTERACT_DAMAGE] = true,[INTERACT_SHOCK] = true, [INTERACT_FLAME] = true , [INTERACT_SNUFIT_BULLET] = true ,[INTERACT_UNKNOWN_08] = true, [INTERACT_MR_BLIZZARD] = true, [INTERACT_CLAM_OR_BUBBA] = true} --interacttypes that super forms doesn't interact with by default
+	local superimmunetable = {[INTERACT_DAMAGE] = true,[INTERACT_SHOCK] = true, [INTERACT_FLAME] = true , [INTERACT_SNUFIT_BULLET] = true ,[INTERACT_UNKNOWN_08] = true , [INTERACT_MR_BLIZZARD] = true, [INTERACT_CLAM_OR_BUBBA] = true} --interacttypes that super forms doesn't interact with by default
 	if m.playerIndex ~= 0 then
         return
     end
 	local customfuncresult
 	local x = get_id_from_behavior(o.behavior)
 	if  gPlayerSyncTable[0].issuper == true  then
-		if customenemyfunctions[x] ~= nil then
+		if (customenemyfunctions[x] ~= nil) and (type(customenemyfunctions[x]) == "function") then
 			local customfunc = customenemyfunctions[x]
 			if customfunc ~= nil then
                 customfuncresult = customfunc(o)--whether the object can interact with mario return true to allow false disallow or a non boolean to have the object use default allow interaction settings for its type
@@ -639,7 +679,7 @@ local function allow_interact(m,o,interactType)
 				o.oInteractStatus =  ATTACK_GROUND_POUND_OR_TWIRL | INT_STATUS_INTERACTED | INT_STATUS_WAS_ATTACKED
 				return false
 			end
-		elseif interactType == INTERACT_BULLY then
+		elseif (interactType == INTERACT_BULLY) or ((customenemyfunctions[x] ~= nil) and (type(customenemyfunctions[x]) == "string") and (customenemyfunctions[x] == "INTERACT_BULLY")) then
 			o.oInteractStatus = ATTACK_KICK_OR_TRIP | INT_STATUS_INTERACTED | INT_STATUS_WAS_ATTACKED
 			o.oAction = BULLY_ACT_KNOCKBACK
 			o.oFlags = o.oFlags & ~0x8
@@ -649,11 +689,11 @@ local function allow_interact(m,o,interactType)
 			o.oBullyLastNetworkPlayerIndex = gNetworkPlayers[0].globalIndex
 			m.interactObj = o
 			return false
-		elseif x == id_bhvChuckya then
+		elseif (x == id_bhvChuckya) or ((customenemyfunctions[x] ~= nil) and (type(customenemyfunctions[x]) == "string") and (customenemyfunctions[x] == "id_bhvChuckya")) then
 			o.oAction = 2
             o.oMoveFlags = o.oMoveFlags & OBJ_MOVE_LANDED
 			return false
-		elseif x == id_bhvKingBobomb then
+		elseif (x == id_bhvKingBobomb) or ((customenemyfunctions[x] ~= nil) and (type(customenemyfunctions[x]) == "string") and (customenemyfunctions[x] == "id_bhvKingBobomb")) then
 			if (o.oAction ~= 0 and o.oAction ~= 4 and o.oAction ~= 5 and o.oAction ~= 6 and o.oAction ~= 7 and o.oAction ~= 8) then
 				o.oPosY = o.oPosY + 20
                 o.oVelY = 50
@@ -661,12 +701,15 @@ local function allow_interact(m,o,interactType)
                 o.oAction = 4
 			end
 			return false
-		elseif x == id_bhvBowser then
+		elseif (x == id_bhvBowser) or ((customenemyfunctions[x] ~= nil) and (type(customenemyfunctions[x]) == "string") and (customenemyfunctions[x] == "id_bhvBowser")) then
 			if (o.oAction ~= 0 and o.oAction ~= 4 and o.oAction ~= 5 and o.oAction ~= 6 and o.oAction ~= 12 and o.oAction ~= 20 ) then
 				o.oHealth = o.oHealth - 1
                     if o.oHealth  <= 0 then
                         o.oMoveAngleYaw = o.oBowserAngleToCentre + 0x8000
                         o.oAction = 4
+						spawn_non_sync_object(id_bhvbowserbossdeathconfirm,E_MODEL_NONE,o.oPosX,o.oPosY,o.oPosZ,function(newobj)
+							newobj.parentObj = o
+						end)
                     else
                         o.oAction = 12
                     end
@@ -674,7 +717,7 @@ local function allow_interact(m,o,interactType)
 			return false
 		end
 	elseif (gPlayerSyncTable[0].shieldhits > 0) then
-		if customenemyfunctions ~= nil and customenemyfunctions[x] ~= nil then
+		if (customenemyfunctions ~= nil) and (customenemyfunctions[x] ~= nil) and (type(customenemyfunctions[x]) == "function")  then
 			local customfunc = customenemyfunctions[x]
 			if customfunc ~= nil then
 				customfuncresult = customfunc(o)--whether the object can interact with mario return true to allow false disallow or a non boolean to have the object use default allow interaction settings for its type
@@ -688,7 +731,7 @@ local function allow_interact(m,o,interactType)
 		elseif (gPlayerSyncTable[0].shieldtype == shieldtypetable["lightning"]) and interactType == INTERACT_SHOCK then
 			return false
 		end
-	elseif customenemyfunctions ~= nil and customenemyfunctions[x] ~= nil then
+	elseif (customenemyfunctions ~= nil) and (customenemyfunctions[x] ~= nil) and (type(customenemyfunctions[x]) == "function")  then
 		local customfunc = customenemyfunctions[x]
 		if customfunc ~= nil then
 			return customfunc(o)--whether the object can interact return true to allow false otherwise
@@ -742,6 +785,81 @@ local function modsupport()
 			_G.charSelect.credit_add(string.format("sonic health version %s", version),"steven.","code helper")
 		end
 	end
+	for key,value in pairs(gActiveMods) do
+        if (value.incompatible ~= nil) and string.match((value.incompatible), "romhack") then
+			if value.name == nil then
+
+            elseif ((value.name == "Star Road")) then --star road support
+				if (bhvBowser ~= nil) and (customenemyfunctions[bhvBowser] == nil) then
+                    _G.sonichealth.addcustomenemyfunction(function(o)
+						if  gPlayerSyncTable[0].issuper == true  then
+							if (o.oAction ~= 0 and o.oAction ~= 4 and o.oAction ~= 5 and o.oAction ~= 6 and o.oAction ~= 12 and o.oAction ~= 20 ) then
+								o.oHealth = o.oHealth - 1
+									if o.oHealth  <= 0 then
+										o.oMoveAngleYaw = o.oBowserAngleToCentre + 0x8000
+										o.oAction = 4
+										spawn_non_sync_object(id_bhvbowserbossdeathconfirm,E_MODEL_NONE,o.oPosX,o.oPosY,o.oPosZ,function(newobj)
+											newobj.parentObj = o
+										end)
+									else
+										o.oAction = 12
+									end
+							elseif o.oAction == 4 and o.oSubAction == 11 and o.oHealth  > 0 then
+								o.oHealth = o.oHealth - 1
+								o.oAction = 12
+							end
+							return false
+						end
+					end,bhvBowser) --making star road's bowser killable by sonic health super form
+				else
+					_G.sonichealth.addcustomenemyfunction(function(o)
+						if  gPlayerSyncTable[0].issuper == true  then
+							if (o.oAction ~= 0 and o.oAction ~= 4 and o.oAction ~= 5 and o.oAction ~= 6 and o.oAction ~= 12 and o.oAction ~= 20 ) then
+								o.oHealth = o.oHealth - 1
+									if o.oHealth  <= 0 then
+										o.oMoveAngleYaw = o.oBowserAngleToCentre + 0x8000
+										o.oAction = 4
+										spawn_non_sync_object(id_bhvbowserbossdeathconfirm,E_MODEL_NONE,o.oPosX,o.oPosY,o.oPosZ,function(newobj)
+											newobj.parentObj = o
+										end)
+									else
+										o.oAction = 12
+									end
+							elseif o.oAction == 4 and o.oSubAction == 11 and o.oHealth  > 0 then
+								o.oHealth = o.oHealth - 1
+								o.oAction = 12
+							end
+							return false
+						end
+					end,id_bhvBowser) --making star road's bowser killable by sonic health super form
+                end
+			end
+		elseif value.name == nil then
+
+		elseif (string.match(value.name,"Brutal Bosses")) then
+			_G.sonichealth.addcustomenemyfunction(function(o)
+				if  gPlayerSyncTable[0].issuper == true  then
+					local immuneactions = {[2] = true,[4] = true}
+                	if (o.oInteractType ~= INTERACT_TEXT) then
+						if (immuneactions[o.oAction] ~= true) then
+                    		o.oInteractStatus = INT_STATUS_INTERACTED | INT_STATUS_WAS_ATTACKED
+						end
+						return false
+                	end
+				end
+			end,bhvBossCustomToadMessage)--making brutal boss's toad boss killable by sonic health super form
+			_G.sonichealth.addcustomenemyfunction(function(o)
+				if  gPlayerSyncTable[0].issuper == true  then
+					local YOSHI_ACT_DAMAGED = YOSHI_ACT_CREDITS + 4
+                	if (o.oAction > YOSHI_ACT_CREDITS) and (o.oInteractType ~= INTERACT_TEXT) and (o.oAction ~= YOSHI_ACT_DAMAGED) then
+                    	o.oInteractStatus = INT_STATUS_INTERACTED | INT_STATUS_TOUCHED_BOB_OMB
+                    	return false
+                	end
+				end
+			end,bhvYoshi)--making brutal boss's yoshi boss killable by sonic health super form
+		end
+
+	end
 	if servermodsync then --if using coopdx after the merge
 		if (mod_storage_load("friendlyringloss") == nil) or (mod_storage_load("loseringsonlevelchange") == nil) or (mod_storage_load("ringscrushinstadeath") == nil) or (mod_storage_load("decreasecoincounter") == nil) or (mod_storage_load("recoveryheartshield") == nil) or (mod_storage_load("sonicfalldamage") == nil) or (mod_storage_load("sonicsuperallow") == nil) or (mod_storage_load("maxringloss") == nil) or (mod_storage_load("maxrecollectablerings") == nil) then
 			mod_storage_save_bool("friendlyringloss", gGlobalSyncTable.friendlyringloss)
@@ -773,10 +891,13 @@ local function modsupport()
 			gGlobalSyncTable.superstarreq = mod_storage_load_number("superstarreq")
 			gGlobalSyncTable.disablelavabounce = toboolean( mod_storage_load("disablelavabounce"))
 		end
+		if hook_mod_menu_text ~= nil then
+            hook_mod_menu_text(string.format("mod version %s",version))
+        end
 		hook_mod_menu_button("print sonic health server config",function(index)
             sonichealthconfig_command('printserver')
         end)
-        hook_mod_menu_button("print sonic health server config",function(index)
+        hook_mod_menu_button("print sonic health local config",function(index)
             sonichealthconfig_command('printlocal')
         end)
 
@@ -1059,6 +1180,17 @@ local function allow_hazard_surface(m,hazardType)
 		end
 
     end
+end
+
+---@param m MarioState
+--Called once per player per frame at the beginning of a mario update
+local function before_mario_update(m)
+	if m.playerIndex ~= 0 then
+		return
+	end
+	if ((m.marioObj.oInteractStatus & INT_STATUS_HIT_BY_SHOCKWAVE) ~= 0 ) and ((gPlayerSyncTable[0].shieldtype == shieldtypetable["lightning"]) or (gPlayerSyncTable[0].issuper == true)) then
+		m.marioObj.oInteractStatus = m.marioObj.oInteractStatus & ~INT_STATUS_HIT_BY_SHOCKWAVE
+	end
 end
 
 --- @param msg string
@@ -1508,10 +1640,13 @@ hook_event(HOOK_UPDATE,health_hook_update) -- hook that is called once per frame
 hook_event(HOOK_ON_SET_MARIO_ACTION,on_set_mario) -- hook that is called every time a player's current action is changed
 hook_event(HOOK_JOINED_GAME, on_join) -- Called when the local player finishes the join process (if the player isn't the host)
 hook_event(HOOK_ALLOW_HAZARD_SURFACE, allow_hazard_surface) --Called once per player per frame. Return false to prevent the player from being affected by lava or quicksand.
+hook_event(HOOK_BEFORE_MARIO_UPDATE, before_mario_update) --Called once per player per frame at the beginning of a mario update
 
 
 id_bhvCoinring = hook_behavior(nil, OBJ_LIST_LEVEL, true, bhv_coinring_init, bhv_coinring_loop)--The behavior for sonic health's rings
 hook_behavior(id_bhvRecoveryHeart, OBJ_LIST_LEVEL, false, nil, bhv_sonicshield_heart_loop)
+id_bhvbowserbossdeathconfirm = hook_behavior(nil, OBJ_LIST_LEVEL, true, bhv_sonichealthbowserdeathconfirm_init, bhv_sonichealthbowserdeathconfirm_loop) --the function for the object that is used for making sure bowser dies when he is set to 0 or less health by a kirby move or projectile
+
 
 hook_chat_command('maxringloss', "maxringloss [number] this sets the max number of rings you can lose at once set it to 0 to always lose all rings.", maxringloss_command)
 hook_chat_command('sonichealthconfig', "[save|load|savesuperpreqpref|loadsuperpreqpref|printserver|printlocal] to save the current sonic health settings to a file or load them (loading only works if used by a moderator or the server)", sonichealthconfig_command)
@@ -1675,6 +1810,10 @@ _G.sonichealth = {
 		end
 		if (type(arg[1]) == "function") then
 			customfunction = arg[1]
+		elseif (type(arg[1]) == "string") then
+			bhvid = arg[2]
+			customenemyfunctions[bhvid] = customfunction
+			return
 		else 
 			if usingcoopdx > 0 then
                 log_to_console(string.format("arg[1] that was passed to _G.sonichealth.addcustomenemyfunction wasn't a function this occured on sonic health version %s",version), 1)
@@ -1742,6 +1881,8 @@ _G.sonichealth = {
 		return version
 	end
 }
+
+modsupporthelperfunctions.sonichealth = _G.sonichealth
 
 if usingcoopdx == 3 then
     hook_event(HOOK_ON_MODS_LOADED, modsupport) --Called directly after every mod file is loaded in by smlua
