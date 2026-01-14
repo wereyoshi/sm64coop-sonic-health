@@ -1,6 +1,6 @@
 -- name: .Sonic Health
 -- description: Makes you lose coins on hit if you have no coins on hit you die \nCreated by wereyoshi. \n\nExtra coding by \\#00ffff\\steven.
-
+ 
 local ringcount = 0 --the number of rings the local player has
 gGlobalSyncTable.friendlyringloss = false --whether other players can cause you to lose rings
 gGlobalSyncTable.maxringloss = 0 --maximum amount of rings you are allowed to lose at once if its equal to 0 you lose all rings at once
@@ -1634,3 +1634,4 @@ hook_event(HOOK_JOINED_GAME, on_join) -- Called when the local player finishes t
 hook_event(HOOK_ON_PLAYER_CONNECTED, on_player_connected) -- hook for player joining
 
  ]]
+
